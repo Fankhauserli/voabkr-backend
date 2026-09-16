@@ -144,6 +144,34 @@ func (q *Queries) CreateUserCard(ctx context.Context, arg CreateUserCardParams) 
 	return i, err
 }
 
+const createVerificationToken = `-- name: CreateVerificationToken :one
+INSERT INTO mail_verifications (
+  user_id, token, expires_at
+) VALUES (
+  $1, $2, $3
+)
+RETURNING id, user_id, token, created_at, expires_at
+`
+
+type CreateVerificationTokenParams struct {
+	UserID    int64
+	Token     string
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateVerificationToken(ctx context.Context, arg CreateVerificationTokenParams) (MailVerification, error) {
+	row := q.db.QueryRow(ctx, createVerificationToken, arg.UserID, arg.Token, arg.ExpiresAt)
+	var i MailVerification
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Token,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const deleteCard = `-- name: DeleteCard :exec
 UPDATE cards
 SET deleted_at = NOW()
@@ -189,6 +217,26 @@ type DeleteUserCardParams struct {
 
 func (q *Queries) DeleteUserCard(ctx context.Context, arg DeleteUserCardParams) error {
 	_, err := q.db.Exec(ctx, deleteUserCard, arg.UserID, arg.CardID)
+	return err
+}
+
+const deleteVerificationToken = `-- name: DeleteVerificationToken :exec
+DELETE FROM mail_verifications
+WHERE token = $1
+`
+
+func (q *Queries) DeleteVerificationToken(ctx context.Context, token string) error {
+	_, err := q.db.Exec(ctx, deleteVerificationToken, token)
+	return err
+}
+
+const deleteVerificationTokensByUserID = `-- name: DeleteVerificationTokensByUserID :exec
+DELETE FROM mail_verifications
+WHERE user_id = $1
+`
+
+func (q *Queries) DeleteVerificationTokensByUserID(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, deleteVerificationTokensByUserID, userID)
 	return err
 }
 
@@ -242,6 +290,28 @@ WHERE id = $1 LIMIT 1
 
 func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 	row := q.db.QueryRow(ctx, getUser, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.IsActive,
+		&i.EmailVerified,
+	)
+	return i, err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, name, email, password_hash, created_at, updated_at, deleted_at, is_active, email_verified FROM users
+WHERE email = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -386,6 +456,25 @@ func (q *Queries) GetUserCardsDueForReviewCount(ctx context.Context, userID int6
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getVerificationToken = `-- name: GetVerificationToken :one
+SELECT id, user_id, token, created_at, expires_at FROM mail_verifications
+WHERE token = $1
+LIMIT 1
+`
+
+func (q *Queries) GetVerificationToken(ctx context.Context, token string) (MailVerification, error) {
+	row := q.db.QueryRow(ctx, getVerificationToken, token)
+	var i MailVerification
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Token,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
 }
 
 const listDecks = `-- name: ListDecks :many
@@ -563,6 +652,18 @@ func (q *Queries) UpdateUserCard(ctx context.Context, arg UpdateUserCardParams) 
 		arg.LastReviewedAt,
 		arg.NextReviewAt,
 	)
+	return err
+}
+
+const updateUserEmailVerified = `-- name: UpdateUserEmailVerified :exec
+UPDATE users
+SET email_verified = TRUE,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) UpdateUserEmailVerified(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, updateUserEmailVerified, id)
 	return err
 }
 

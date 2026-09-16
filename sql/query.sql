@@ -2,6 +2,10 @@
 SELECT * FROM users
 WHERE id = $1 LIMIT 1;
 
+-- name: GetUserByEmail :one
+SELECT * FROM users
+WHERE email = $1 LIMIT 1;
+
 -- name: ListUsers :many
 SELECT * FROM users
 ORDER BY name;
@@ -22,10 +26,37 @@ UPDATE users
   updated_at = NOW()
 WHERE id = $1;
 
+-- name: UpdateUserEmailVerified :exec
+UPDATE users
+SET email_verified = TRUE,
+    updated_at = NOW()
+WHERE id = $1;
+
 -- name: DeleteUser :exec
 UPDATE users
 SET deleted_at = NOW()
 WHERE id = $1;
+
+-- name: GetVerificationToken :one
+SELECT * FROM mail_verifications
+WHERE token = $1
+LIMIT 1;
+
+-- name: CreateVerificationToken :one
+INSERT INTO mail_verifications (
+  user_id, token, expires_at
+) VALUES (
+  $1, $2, $3
+)
+RETURNING *;
+
+-- name: DeleteVerificationToken :exec
+DELETE FROM mail_verifications
+WHERE token = $1;
+
+-- name: DeleteVerificationTokensByUserID :exec
+DELETE FROM mail_verifications
+WHERE user_id = $1;
 
 --- name: GetUserSettings :one
 SELECT * FROM settings

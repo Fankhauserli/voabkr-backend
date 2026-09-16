@@ -74,6 +74,14 @@ type Deck struct {
 	DeletedAt pgtype.Timestamptz
 }
 
+type MailVerification struct {
+	ID        int64
+	UserID    int64
+	Token     string
+	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+}
+
 type Setting struct {
 	ID          int64
 	UserID      int64
