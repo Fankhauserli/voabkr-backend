@@ -19,7 +19,14 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.20'
+        go-version: '1.27'
+
+    - name: build sqlc
+      run: |
+        go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+        cd sql
+        sqlc generate
+        cd ..
 
     - name: Build
       run: go build -v ./...
