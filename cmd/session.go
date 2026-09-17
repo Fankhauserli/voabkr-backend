@@ -17,6 +17,11 @@ func ensureSessionMiddleware(router *gin.Engine) {
 	}
 
 	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisUsername := os.Getenv("REDIS_USERNAME")
+
+	if redisUsername == "" {
+		redisUsername = "default"
+	}
 
 	secret := os.Getenv("SESSION_SECRET")
 	if secret == "" {
@@ -24,7 +29,7 @@ func ensureSessionMiddleware(router *gin.Engine) {
 	}
 
 	// Connect to Redis for session storage
-	store, err := redis.NewStore(10, "tcp", redisAddr, redisPassword, secret)
+	store, err := redis.NewStore(10, "tcp", redisAddr, redisUsername, redisPassword, []byte(secret))
 	if err != nil {
 		panic(err)
 	}
