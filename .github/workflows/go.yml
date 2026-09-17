@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: "fankhauserli/voabkr-backend"
+  IMAGE_NAME: "fankhauserli/voabkr-backend/voabkr-backend"
 
 jobs:
 
