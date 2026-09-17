@@ -3,7 +3,7 @@ package handlers
 import "github.com/gin-gonic/gin"
 
 func (h *Handler) GetCards(c *gin.Context) {
-
+	// Implement logic to get cards
 }
 
 func (h *Handler) CreateCard(c *gin.Context) {

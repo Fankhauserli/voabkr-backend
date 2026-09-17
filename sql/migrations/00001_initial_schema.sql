@@ -1,3 +1,4 @@
+-- +goose Up
 CREATE TABLE users (
     id   BIGSERIAL PRIMARY KEY,
     name text      NOT NULL,
@@ -21,7 +22,6 @@ CREATE TABLE mail_verifications (
 CREATE TABLE settings (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    -- dont know yet --
     cards_per_day INT NOT NULL DEFAULT 20,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -54,7 +54,6 @@ CREATE TABLE cards (
     deleted_at TIMESTAMPTZ
 );
 
-
 CREATE TABLE user_cards (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -69,3 +68,12 @@ CREATE TABLE user_cards (
     deleted_at TIMESTAMPTZ,
     UNIQUE(user_id, card_id)
 );
+
+-- +goose Down
+DROP TABLE IF EXISTS user_cards;
+DROP TABLE IF EXISTS cards;
+DROP TABLE IF EXISTS decks;
+DROP TYPE IF EXISTS deck_type;
+DROP TABLE IF EXISTS settings;
+DROP TABLE IF EXISTS mail_verifications;
+DROP TABLE IF EXISTS users;

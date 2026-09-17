@@ -17,9 +17,9 @@ func main() {
 
 	ensureSessionMiddleware(router)
 
-	db, err := getDB()
+	db, err := initDB()
 	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
+		log.Fatalf("failed to initialize database: %v", err)
 	}
 
 	// Create a new handler with the database connection
