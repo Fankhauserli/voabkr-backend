@@ -17,9 +17,6 @@ func ensureSessionMiddleware(router *gin.Engine) {
 	}
 
 	redisPassword := os.Getenv("REDIS_PASSWORD")
-	if redisPassword == "" {
-		log.Fatal("REDIS_PASSWORD environment variable is not set")
-	}
 
 	secret := os.Getenv("SESSION_SECRET")
 	if secret == "" {
