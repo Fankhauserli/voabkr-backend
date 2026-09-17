@@ -123,3 +123,13 @@ docker run --env-file .env -p 8080:8080 voabkr-backend
 
 - `GET /healthz` - Basic liveness probe
 - `GET /readyz` - Readiness probe
+
+---
+
+## Database Migrations
+
+Database migrations are managed using [Goose](https://github.com/pressly/goose) and embedded directly into the application binary (`sql/migrations/`).
+
+- **Automatic execution**: Migrations are applied automatically on application startup whenever `DB_CONN_STRING` is configured.
+- **Adding migrations**: Create a new file in `sql/migrations/` following the naming convention `0000X_description.sql` with `-- +goose Up` and `-- +goose Down` directives.
+- **Code generation**: Run `sqlc generate` in the `sql/` directory to regenerate type-safe Go queries from the migration schema.
