@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"net"
 	"net/smtp"
 	"os"
 	"time"
@@ -46,16 +45,9 @@ func SendVerificationEmail(c *gin.Context, database *db.Queries, userID int, ema
 		return nil
 	}
 
-	host, _, err := net.SplitHostPort(smtpAddr)
-	if err != nil {
-		// If port was omitted, default to 587
-		host = smtpAddr
-		smtpAddr = net.JoinHostPort(smtpAddr, "587")
-	}
-
 	var smtpAuth smtp.Auth
 	if smtpUser != "" && smtpPass != "" {
-		smtpAuth = smtp.PlainAuth("", smtpUser, smtpPass, host)
+		smtpAuth = smtp.PlainAuth("", smtpUser, smtpPass, smtpAddr)
 	}
 
 	msg := []byte("Subject: Verify your email\r\n\r\nVerification email content, including the token: " + token)
