@@ -4,10 +4,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/redis"
 	"github.com/gin-gonic/gin"
+	redigo "github.com/gomodule/redigo/redis"
 )
 
 func ensureSessionMiddleware(router *gin.Engine) {
@@ -19,13 +21,32 @@ func ensureSessionMiddleware(router *gin.Engine) {
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 	redisUsername := os.Getenv("REDIS_USERNAME")
 
-	if redisUsername == "" {
-		redisUsername = "default"
-	}
-
 	secret := os.Getenv("SESSION_SECRET")
 	if secret == "" {
 		log.Fatal("SESSION_SECRET environment variable is not set")
+	}
+
+	// Test Redis connectivity at startup with a short timeout
+	dialOpts := []redigo.DialOption{
+		redigo.DialConnectTimeout(3 * time.Second),
+	}
+	if redisPassword != "" {
+		dialOpts = append(dialOpts, redigo.DialPassword(redisPassword))
+	}
+	if redisUsername != "" {
+		dialOpts = append(dialOpts, redigo.DialUsername(redisUsername))
+	}
+
+	testConn, err := redigo.Dial("tcp", redisAddr, dialOpts...)
+	if err != nil {
+		log.Printf("[WARNING] Could not connect to Redis at %s: %v. (Check REDIS_ADDR, REDIS_PASSWORD, and network)", redisAddr, err)
+	} else {
+		if _, pingErr := testConn.Do("PING"); pingErr != nil {
+			log.Printf("[WARNING] Redis ping at %s failed: %v", redisAddr, pingErr)
+		} else {
+			log.Printf("[INFO] Successfully connected to Redis at %s", redisAddr)
+		}
+		testConn.Close()
 	}
 
 	// Connect to Redis for session storage

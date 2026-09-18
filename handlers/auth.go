@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -13,6 +14,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func respondWithError(c *gin.Context, code int, message string, err error) {
+	if err != nil {
+		log.Printf("[ERROR] %s: %v", message, err)
+		_ = c.Error(err)
+	} else {
+		log.Printf("[ERROR] %s", message)
+	}
+
+	resp := gin.H{"error": message}
+	if err != nil && gin.Mode() == gin.DebugMode {
+		resp["details"] = err.Error()
+	}
+	c.JSON(code, resp)
+}
 
 func setupSession(c *gin.Context, userID string) error {
 	session := sessions.Default(c)
@@ -28,24 +44,28 @@ func setupSession(c *gin.Context, userID string) error {
 func (h *Handler) Login(c *gin.Context) {
 	var req types.LoginRequestBody
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		log.Printf("[WARN] Login: invalid request body: %v", err)
+		respondWithError(c, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
 	user, err := h.DB.GetUserByEmail(c, req.Email)
 	if err != nil {
+		log.Printf("[WARN] Login: user not found (%s): %v", req.Email, err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
 	if !helpers.CheckPasswordHash(req.Password, user.PasswordHash) {
+		log.Printf("[WARN] Login: invalid password for user (%s)", req.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
 	err = setupSession(c, fmt.Sprint(user.ID))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
+		log.Printf("[ERROR] Login: failed to create session for user %d (%s): %v", user.ID, req.Email, err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to create session", err)
 		return
 	}
 
@@ -55,13 +75,15 @@ func (h *Handler) Login(c *gin.Context) {
 func (h *Handler) Register(c *gin.Context) {
 	var req types.RegisterRequestBody
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		log.Printf("[WARN] Register: invalid request body: %v", err)
+		respondWithError(c, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
 	hashedPassword, err := helpers.HashPassword(req.Password)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		log.Printf("[ERROR] Register: failed to hash password: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to hash password", err)
 		return
 	}
 
@@ -76,19 +98,28 @@ func (h *Handler) Register(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "User with this email already exists"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		log.Printf("[ERROR] Register: failed to create user (%s): %v", req.Email, err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to create user", err)
 		return
 	}
 
 	err = helpers.SendVerificationEmail(c, h.DB, int(createdUser.ID), createdUser.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
+		log.Printf("[ERROR] Register: failed to send verification email for user %d (%s): %v", createdUser.ID, createdUser.Email, err)
+		// Clean up created user to avoid leaving an unusable orphan record
+		_ = h.DB.DeleteVerificationTokensByUserID(c.Request.Context(), createdUser.ID)
+		_ = h.DB.DeleteUser(c.Request.Context(), createdUser.ID)
+		respondWithError(c, http.StatusInternalServerError, "Failed to send verification email", err)
 		return
 	}
 
 	err = setupSession(c, fmt.Sprint(createdUser.ID))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
+		log.Printf("[ERROR] Register: failed to create session for user %d (%s): %v", createdUser.ID, createdUser.Email, err)
+		// Clean up created user to avoid leaving an unusable orphan record
+		_ = h.DB.DeleteVerificationTokensByUserID(c.Request.Context(), createdUser.ID)
+		_ = h.DB.DeleteUser(c.Request.Context(), createdUser.ID)
+		respondWithError(c, http.StatusInternalServerError, "Failed to create session", err)
 		return
 	}
 
@@ -100,7 +131,8 @@ func (h *Handler) Logout(c *gin.Context) {
 	session.Clear()
 	session.Options(sessions.Options{MaxAge: -1}) // Clears cookie on client
 	if err := session.Save(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to terminate session"})
+		log.Printf("[ERROR] Logout: failed to terminate session: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to terminate session", err)
 		return
 	}
 
@@ -119,6 +151,7 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 
 	verification, err := h.DB.GetVerificationToken(c.Request.Context(), token)
 	if err != nil {
+		log.Printf("[WARN] VerifyEmail: invalid or expired token '%s': %v", token, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired token"})
 		return
 	}
@@ -130,7 +163,8 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 
 	err = h.DB.UpdateUserEmailVerified(c.Request.Context(), verification.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify email"})
+		log.Printf("[ERROR] VerifyEmail: failed to update email verified for user %d: %v", verification.UserID, err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to verify email", err)
 		return
 	}
 

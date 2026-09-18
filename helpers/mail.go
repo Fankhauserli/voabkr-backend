@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"net/smtp"
 	"os"
@@ -31,6 +32,7 @@ func SendVerificationEmail(c *gin.Context, database *db.Queries, userID int, ema
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true}, // Token expires in 24 hours
 	})
 	if err != nil {
+		log.Printf("[ERROR] Failed to store verification token for user %d: %v", userID, err)
 		return fmt.Errorf("failed to store verification token: %w", err)
 	}
 
@@ -40,21 +42,25 @@ func SendVerificationEmail(c *gin.Context, database *db.Queries, userID int, ema
 	fromEmail := os.Getenv("FROM_EMAIL")
 
 	if smtpAddr == "" || fromEmail == "" {
-		// If SMTP is not configured, skip sending email to avoid blocking registration in dev
+		log.Printf("[INFO] SMTP_ADDR or FROM_EMAIL is not configured, skipping email delivery")
 		return nil
+	}
+
+	host, _, err := net.SplitHostPort(smtpAddr)
+	if err != nil {
+		// If port was omitted, default to 587
+		host = smtpAddr
+		smtpAddr = net.JoinHostPort(smtpAddr, "587")
 	}
 
 	var smtpAuth smtp.Auth
 	if smtpUser != "" && smtpPass != "" {
-		host, _, err := net.SplitHostPort(smtpAddr)
-		if err != nil {
-			host = smtpAddr
-		}
 		smtpAuth = smtp.PlainAuth("", smtpUser, smtpPass, host)
 	}
 
 	msg := []byte("Subject: Verify your email\r\n\r\nVerification email content, including the token: " + token)
 	if err := smtp.SendMail(smtpAddr, smtpAuth, fromEmail, []string{email}, msg); err != nil {
+		log.Printf("[ERROR] Failed to send email via SMTP to %s (server %s): %v", email, smtpAddr, err)
 		return fmt.Errorf("failed to send verification email: %w", err)
 	}
 

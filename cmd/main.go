@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"net/http"
 
 	"github.com/Fankhauserli/voabkr-backend/handlers"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
@@ -9,11 +11,24 @@ import (
 )
 
 func main() {
-	// Create a Gin router with default middleware (logger and recovery)
-	router := gin.Default()
+	// Create a Gin router with logger and custom recovery to ensure panics log details and return JSON
+	router := gin.New()
+	router.Use(gin.Logger())
+	router.Use(gin.CustomRecovery(func(c *gin.Context, recovered any) {
+		log.Printf("[PANIC RECOVERED] %v", recovered)
+		resp := gin.H{"error": "Internal server error"}
+		if gin.Mode() == gin.DebugMode {
+			resp["details"] = fmt.Sprint(recovered)
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
+	}))
 
-	router.GET("/healthz")
-	router.GET("/readyz")
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	router.GET("/readyz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	ensureSessionMiddleware(router)
 
