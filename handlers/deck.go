@@ -1,9 +1,30 @@
 package handlers
 
-import "github.com/gin-gonic/gin"
+import (
+	"net/http"
+
+	"github.com/Fankhauserli/voabkr-backend/types"
+	"github.com/gin-gonic/gin"
+)
 
 func (h *Handler) GetDecks(c *gin.Context) {
-	// Implement logic to get decks
+	decks, err := h.DB.ListDecks(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	var returnDecks []types.Deck
+
+	for _, c := range decks {
+		returnDecks = append(returnDecks, types.Deck{
+			ID:   uint(c.ID),
+			Name: c.Name,
+			Type: string(c.Type),
+		})
+	}
+
+	c.JSON(http.StatusOK, returnDecks)
 }
 
 func (h *Handler) CreateDeck(c *gin.Context) {

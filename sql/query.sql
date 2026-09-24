@@ -120,6 +120,9 @@ SELECT * FROM cards
 WHERE id = $1
 LIMIT 1;
 
+-- name: ListCards :many
+SELECT * FROM cards;
+
 -- name: CreateCard :one
 INSERT INTO cards (
   deck_id, korean_word, english_word, context, example_sentence

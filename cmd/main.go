@@ -72,7 +72,7 @@ func main() {
 
 			cardGroup := v1private.Group("/cards")
 			{
-				cardGroup.POST("/", handler.CreateCard)
+				cardGroup.POST("/", handler.CreateCards)
 				cardGroup.GET("/", handler.GetCards)
 				cardGroup.GET("/:id", handler.GetCardByID)
 				cardGroup.PUT("/:id", handler.UpdateCard)

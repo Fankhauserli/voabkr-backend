@@ -477,6 +477,40 @@ func (q *Queries) GetVerificationToken(ctx context.Context, token string) (MailV
 	return i, err
 }
 
+const listCards = `-- name: ListCards :many
+SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
+`
+
+func (q *Queries) ListCards(ctx context.Context) ([]Card, error) {
+	rows, err := q.db.Query(ctx, listCards)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Card
+	for rows.Next() {
+		var i Card
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.KoreanWord,
+			&i.EnglishWord,
+			&i.Context,
+			&i.ExampleSentence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDecks = `-- name: ListDecks :many
 SELECT id, name, type, created_at, updated_at, deleted_at FROM decks
 ORDER BY name
