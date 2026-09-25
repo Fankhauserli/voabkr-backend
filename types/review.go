@@ -1,5 +1,5 @@
 package types
 
-type ReviewResponse struct {
+type Review struct {
 	CardID uint `json:"cardID"`
 }

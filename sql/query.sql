@@ -101,6 +101,13 @@ SELECT * FROM user_cards
 WHERE user_id = $1 AND next_review_at <= NOW() AND next_review_at > $2
 ORDER BY next_review_at ASC;
 
+-- name: GetCardsDueForReview :many
+SELECT * FROM cards
+WHERE id IN
+(SELECT card_id FROM user_cards
+WHERE user_id = $1 AND next_review_at <= NOW());
+
+
 -- name: UpdateUserCard :exec
 UPDATE user_cards
 SET efactor = $3,
@@ -121,7 +128,8 @@ WHERE id = $1
 LIMIT 1;
 
 -- name: ListCards :many
-SELECT * FROM cards;
+SELECT * FROM cards
+WHERE deleted_at > NOW() OR deleted_at IS NULL;
 
 -- name: CreateCard :one
 INSERT INTO cards (
@@ -153,6 +161,7 @@ LIMIT 1;
 
 -- name: ListDecks :many
 SELECT * FROM decks
+WHERE deleted_at > NOW()
 ORDER BY name;
 
 -- name: CreateDeck :one

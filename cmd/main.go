@@ -83,6 +83,7 @@ func main() {
 			{
 				reviewGroup.GET("/", handler.GetReviews)
 				reviewGroup.POST("/", handler.CreateReview)
+				reviewGroup.GET("/since/:time", handler.GetReviewsSince)
 				reviewGroup.PUT("/:id", handler.UpdateReview)
 			}
 		}

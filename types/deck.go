@@ -5,3 +5,8 @@ type Deck struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
+
+type DeckRequest struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
