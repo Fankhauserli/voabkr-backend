@@ -104,6 +104,13 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
+	_, err = h.DB.CreateUserSettings(c.Request.Context(), createdUser.ID)
+	if err != nil {
+		log.Printf("[ERROR] Register: failed to create user settings for user %d (%s): %v", createdUser.ID, createdUser.Email, err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to create user settings", err)
+		return
+	}
+
 	err = helpers.SendVerificationEmail(c, h.DB, int(createdUser.ID), createdUser.Email, createdUser.Name)
 	if err != nil {
 		log.Printf("[ERROR] Register: failed to send verification email for user %d (%s): %v", createdUser.ID, createdUser.Email, err)

@@ -144,6 +144,28 @@ func (q *Queries) CreateUserCard(ctx context.Context, arg CreateUserCardParams) 
 	return i, err
 }
 
+const createUserSettings = `-- name: CreateUserSettings :one
+INSERT INTO settings (
+  user_id
+) VALUES (
+  $1
+)
+RETURNING id, user_id, cards_per_day, created_at, updated_at
+`
+
+func (q *Queries) CreateUserSettings(ctx context.Context, userID int64) (Setting, error) {
+	row := q.db.QueryRow(ctx, createUserSettings, userID)
+	var i Setting
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CardsPerDay,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createVerificationToken = `-- name: CreateVerificationToken :one
 INSERT INTO mail_verifications (
   user_id, token, expires_at
@@ -790,10 +812,12 @@ func (q *Queries) UpdateUserEmailVerified(ctx context.Context, id int64) error {
 }
 
 const updateUserSettings = `-- name: UpdateUserSettings :exec
-UPDATE settings
-SET cards_per_day = $2,
+INSERT INTO settings (user_id, cards_per_day, updated_at)
+VALUES ($1, $2, NOW())
+ON CONFLICT (user_id) 
+DO UPDATE SET 
+    cards_per_day = $2,
     updated_at = NOW()
-WHERE user_id = $1
 `
 
 type UpdateUserSettingsParams struct {

@@ -40,7 +40,6 @@ func (h *Handler) GetSettings(c *gin.Context) {
 }
 
 func (h *Handler) UpdateSettings(c *gin.Context) {
-
 	session := sessions.Default(c)
 	userID := session.Get("user_id")
 	if userID == nil {
