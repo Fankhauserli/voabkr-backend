@@ -30,7 +30,7 @@ func (h *Handler) GetCards(c *gin.Context) {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
 	}
 
-	var returnCards []types.Card
+	returnCards := make([]types.Card, 0)
 
 	for _, c := range cards {
 		if targetDeckID > 0 && c.DeckID != targetDeckID {

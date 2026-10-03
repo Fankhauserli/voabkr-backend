@@ -17,7 +17,7 @@ func (h *Handler) GetDecks(c *gin.Context) {
 		return
 	}
 
-	var returnDecks []types.Deck
+	returnDecks := make([]types.Deck, 0)
 
 	for _, c := range decks {
 		returnDecks = append(returnDecks, types.Deck{

@@ -81,12 +81,14 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
 	}
 
-	var returnCards []types.Card
+	returnCards := make([]types.Card, 0)
+	reviewedCardIDs := make(map[int64]bool)
 
 	for _, c := range cards {
 		if targetDeckID > 0 && c.DeckID != targetDeckID {
 			continue
 		}
+		reviewedCardIDs[c.ID] = true
 		returnCards = append(returnCards, types.Card{
 			ID:          uint(c.ID),
 			DeckID:      uint(c.DeckID),
@@ -95,6 +97,45 @@ func (h *Handler) GetReviews(c *gin.Context) {
 			Context:     c.Context.String,
 			Example:     c.ExampleSentence.String,
 		})
+	}
+
+	// In Anki / spaced repetition: if user has fewer due cards than their daily limit,
+	// or hasn't studied any cards yet, introduce unstudied new cards.
+	limit := 20
+	if settings, sErr := h.DB.GetUserSettings(c.Request.Context(), intUserID); sErr == nil && settings.CardsPerDay > 0 {
+		limit = int(settings.CardsPerDay)
+	}
+	if targetDeckID > 0 {
+		limit = 1000
+	}
+
+	if len(returnCards) < limit {
+		allUserCards, _ := h.DB.GetUserCards(c.Request.Context(), intUserID)
+		for _, uc := range allUserCards {
+			reviewedCardIDs[uc.CardID] = true
+		}
+
+		allCards, _ := h.DB.ListCards(c.Request.Context())
+		for _, c := range allCards {
+			if len(returnCards) >= limit {
+				break
+			}
+			if targetDeckID > 0 && c.DeckID != targetDeckID {
+				continue
+			}
+			if reviewedCardIDs[c.ID] {
+				continue
+			}
+			reviewedCardIDs[c.ID] = true
+			returnCards = append(returnCards, types.Card{
+				ID:          uint(c.ID),
+				DeckID:      uint(c.DeckID),
+				KoreanWord:  c.KoreanWord,
+				EnglishWord: c.EnglishWord,
+				Context:     c.Context.String,
+				Example:     c.ExampleSentence.String,
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, returnCards)
@@ -309,7 +350,7 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
 	}
 
-	var returnCards []types.Card
+	returnCards := make([]types.Card, 0)
 
 	for _, c := range cards {
 		if targetDeckID > 0 && c.DeckID != targetDeckID {
