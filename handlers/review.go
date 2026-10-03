@@ -71,6 +71,9 @@ func (h *Handler) GetReviews(c *gin.Context) {
 
 	deckIDStr := c.Query("deck_id")
 	if deckIDStr == "" {
+		deckIDStr = c.Query("deckId")
+	}
+	if deckIDStr == "" {
 		deckIDStr = c.Query("deck")
 	}
 	var targetDeckID int64
@@ -295,6 +298,9 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 	}
 
 	deckIDStr := c.Query("deck_id")
+	if deckIDStr == "" {
+		deckIDStr = c.Query("deckId")
+	}
 	if deckIDStr == "" {
 		deckIDStr = c.Query("deck")
 	}

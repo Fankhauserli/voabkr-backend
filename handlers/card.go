@@ -18,9 +18,24 @@ func (h *Handler) GetCards(c *gin.Context) {
 		return
 	}
 
+	deckIDStr := c.Query("deck_id")
+	if deckIDStr == "" {
+		deckIDStr = c.Query("deckId")
+	}
+	if deckIDStr == "" {
+		deckIDStr = c.Query("deck")
+	}
+	var targetDeckID int64
+	if deckIDStr != "" {
+		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
+	}
+
 	var returnCards []types.Card
 
 	for _, c := range cards {
+		if targetDeckID > 0 && c.DeckID != targetDeckID {
+			continue
+		}
 		returnCards = append(returnCards, types.Card{
 			ID:          uint(c.ID),
 			DeckID:      uint(c.DeckID),

@@ -28,8 +28,12 @@ func (h *Handler) GetSettings(c *gin.Context) {
 
 	settings, err := h.DB.GetUserSettings(c.Request.Context(), intUserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve settings"})
-		return
+		settings, err = h.DB.CreateUserSettings(c.Request.Context(), intUserID)
+		if err != nil {
+			log.Printf("[WARN] Settings: failed to retrieve or initialize settings for user %d: %v", intUserID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve settings"})
+			return
+		}
 	}
 
 	response := types.SettingsResponse{
