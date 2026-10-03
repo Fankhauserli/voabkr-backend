@@ -28,14 +28,13 @@ func (h *Handler) CreateReview(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
-
-	if !ok {
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	_, err := h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
+	_, err = h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
 		UserID: intUserID,
 		CardID: int64(req.CardID),
 	})
@@ -56,9 +55,9 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
 
-	if !ok {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -94,9 +93,9 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
 
-	if !ok {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -194,14 +193,14 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
 
-	if !ok {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	since, isValid := c.Params.Get("since")
+	since, isValid := c.Params.Get("time")
 
 	if !isValid {
 		log.Printf("[WARN] Review: Failed to get card since parameter")

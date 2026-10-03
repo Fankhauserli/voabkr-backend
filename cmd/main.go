@@ -59,6 +59,8 @@ func main() {
 			{
 				userGroup.GET("/profile", handler.GetUserProfile)
 				userGroup.PUT("/profile", handler.UpdateUserProfile)
+				userGroup.GET("/settings", handler.GetSettings)
+				userGroup.PUT("/settings", handler.UpdateSettings)
 			}
 
 			deckGroup := v1private.Group("/decks")

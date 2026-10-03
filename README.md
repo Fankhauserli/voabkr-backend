@@ -2,6 +2,8 @@
 
 Backend service for the **voabkr** vocabulary flashcard application, built with Go, Gin, PostgreSQL (via pgx and sqlc), and Redis.
 
+For the full endpoint reference, request/response structs, and authentication details, see [API Documentation](API.md).
+
 ---
 
 ## Environment Variables

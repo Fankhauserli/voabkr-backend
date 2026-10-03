@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
@@ -17,8 +18,8 @@ func (h *Handler) GetUserProfile(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
-	if !ok {
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -48,8 +49,8 @@ func (h *Handler) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
-	if !ok {
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -60,7 +61,7 @@ func (h *Handler) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	err := h.DB.UpdateUser(c.Request.Context(), db.UpdateUserParams{
+	err = h.DB.UpdateUser(c.Request.Context(), db.UpdateUserParams{
 		ID:    intUserID,
 		Name:  req.Name,
 		Email: req.Email,

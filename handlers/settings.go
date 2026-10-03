@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
@@ -18,9 +19,9 @@ func (h *Handler) GetSettings(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
 
-	if !ok {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -47,9 +48,9 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
-	intUserID, ok := userID.(int64)
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
 
-	if !ok {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -61,7 +62,7 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
-	err := h.DB.UpdateUserSettings(c.Request.Context(), db.UpdateUserSettingsParams{
+	err = h.DB.UpdateUserSettings(c.Request.Context(), db.UpdateUserSettingsParams{
 		UserID:      intUserID,
 		CardsPerDay: int32(req.CardsPerDay),
 	})
