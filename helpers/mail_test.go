@@ -1,6 +1,8 @@
 package helpers
 
 import (
+	"fmt"
+	"mime"
 	"strings"
 	"testing"
 )
@@ -46,7 +48,7 @@ func TestRenderVerificationEmail(t *testing.T) {
 func TestBuildMIMEMessage(t *testing.T) {
 	from := "no-reply@voabkr.com"
 	to := "user@example.com"
-	subject := "Verify your voabkr account"
+	subject := "Verify your voabkr account | 이메일 인증"
 	textBody := "Plain text body with link: http://localhost:5173/verify-email?token=123"
 	htmlBody := "<p>HTML body with link</p>"
 
@@ -59,6 +61,23 @@ func TestBuildMIMEMessage(t *testing.T) {
 	if !strings.Contains(msgStr, "To: user@example.com") {
 		t.Errorf("MIME message missing To header")
 	}
+	expectedSubject := fmt.Sprintf("Subject: %s", mime.QEncoding.Encode("UTF-8", subject))
+	if !strings.Contains(msgStr, expectedSubject) {
+		t.Errorf("MIME message missing or incorrectly encoded Subject header. Expected: %s", expectedSubject)
+	}
+
+	// Verify headers (before the first double CRLF) are strictly 7-bit ASCII to prevent SMTPUTF8 bounce
+	headerEnd := strings.Index(msgStr, "\r\n\r\n")
+	if headerEnd == -1 {
+		t.Fatalf("MIME message missing header separator")
+	}
+	headers := msgStr[:headerEnd]
+	for _, r := range headers {
+		if r > 127 {
+			t.Errorf("MIME headers contain non-ASCII character %q which triggers SMTPUTF8 bounce", r)
+		}
+	}
+
 	if !strings.Contains(msgStr, "multipart/alternative") {
 		t.Errorf("MIME message missing multipart/alternative content-type")
 	}
