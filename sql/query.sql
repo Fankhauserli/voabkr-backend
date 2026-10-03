@@ -64,11 +64,13 @@ WHERE user_id = $1
 LIMIT 1;
 
 -- name: UpdateUserSettings :exec
-INSERT INTO settings (user_id, cards_per_day, updated_at)
-VALUES ($1, $2, NOW())
+INSERT INTO settings (user_id, cards_per_day, study_direction, scratch_pad_enabled, updated_at)
+VALUES ($1, $2, $3, $4, NOW())
 ON CONFLICT (user_id) 
 DO UPDATE SET 
     cards_per_day = $2,
+    study_direction = $3,
+    scratch_pad_enabled = $4,
     updated_at = NOW();
 
 -- name: CreateUserSettings :one

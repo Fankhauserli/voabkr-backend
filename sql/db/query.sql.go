@@ -150,7 +150,7 @@ INSERT INTO settings (
 ) VALUES (
   $1
 )
-RETURNING id, user_id, cards_per_day, created_at, updated_at
+RETURNING id, user_id, cards_per_day, created_at, updated_at, study_direction, scratch_pad_enabled
 `
 
 func (q *Queries) CreateUserSettings(ctx context.Context, userID int64) (Setting, error) {
@@ -162,6 +162,8 @@ func (q *Queries) CreateUserSettings(ctx context.Context, userID int64) (Setting
 		&i.CardsPerDay,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.StudyDirection,
+		&i.ScratchPadEnabled,
 	)
 	return i, err
 }
@@ -548,7 +550,7 @@ func (q *Queries) GetUserCardsDueForReviewCount(ctx context.Context, userID int6
 }
 
 const getUserSettings = `-- name: GetUserSettings :one
-SELECT id, user_id, cards_per_day, created_at, updated_at FROM settings
+SELECT id, user_id, cards_per_day, created_at, updated_at, study_direction, scratch_pad_enabled FROM settings
 WHERE user_id = $1
 LIMIT 1
 `
@@ -562,6 +564,8 @@ func (q *Queries) GetUserSettings(ctx context.Context, userID int64) (Setting, e
 		&i.CardsPerDay,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.StudyDirection,
+		&i.ScratchPadEnabled,
 	)
 	return i, err
 }
@@ -812,20 +816,29 @@ func (q *Queries) UpdateUserEmailVerified(ctx context.Context, id int64) error {
 }
 
 const updateUserSettings = `-- name: UpdateUserSettings :exec
-INSERT INTO settings (user_id, cards_per_day, updated_at)
-VALUES ($1, $2, NOW())
+INSERT INTO settings (user_id, cards_per_day, study_direction, scratch_pad_enabled, updated_at)
+VALUES ($1, $2, $3, $4, NOW())
 ON CONFLICT (user_id) 
 DO UPDATE SET 
     cards_per_day = $2,
+    study_direction = $3,
+    scratch_pad_enabled = $4,
     updated_at = NOW()
 `
 
 type UpdateUserSettingsParams struct {
-	UserID      int64
-	CardsPerDay int32
+	UserID            int64
+	CardsPerDay       int32
+	StudyDirection    string
+	ScratchPadEnabled bool
 }
 
 func (q *Queries) UpdateUserSettings(ctx context.Context, arg UpdateUserSettingsParams) error {
-	_, err := q.db.Exec(ctx, updateUserSettings, arg.UserID, arg.CardsPerDay)
+	_, err := q.db.Exec(ctx, updateUserSettings,
+		arg.UserID,
+		arg.CardsPerDay,
+		arg.StudyDirection,
+		arg.ScratchPadEnabled,
+	)
 	return err
 }

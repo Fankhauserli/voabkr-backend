@@ -83,11 +83,13 @@ type MailVerification struct {
 }
 
 type Setting struct {
-	ID          int64
-	UserID      int64
-	CardsPerDay int32
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
+	ID                int64
+	UserID            int64
+	CardsPerDay       int32
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	StudyDirection    string
+	ScratchPadEnabled bool
 }
 
 type User struct {

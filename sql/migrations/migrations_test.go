@@ -23,10 +23,11 @@ func TestEmbeddedMigrations(t *testing.T) {
 	}
 
 	t.Logf("Found %d migrations:", len(migrations))
-	for _, m := range migrations {
+	for i, m := range migrations {
 		t.Logf("- %s (version: %d)", m.Source, m.Version)
-		if m.Version != 1 {
-			t.Errorf("expected version 1 for first migration, got %d", m.Version)
+		expectedVersion := int64(i + 1)
+		if m.Version != expectedVersion {
+			t.Errorf("expected version %d for migration %d, got %d", expectedVersion, i+1, m.Version)
 		}
 	}
 }

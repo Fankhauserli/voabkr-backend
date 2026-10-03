@@ -21,8 +21,9 @@ CREATE TABLE mail_verifications (
 CREATE TABLE settings (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    -- dont know yet --
     cards_per_day INT NOT NULL DEFAULT 20,
+    study_direction text NOT NULL DEFAULT 'koreanToEnglish',
+    scratch_pad_enabled boolean NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(user_id)
