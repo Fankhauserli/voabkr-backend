@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/helpers"
@@ -169,4 +170,57 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
+}
+
+type ResendVerificationRequest struct {
+	Email string `json:"email"`
+}
+
+func (h *Handler) ResendVerificationEmail(c *gin.Context) {
+	session := sessions.Default(c)
+	sessionUserID := session.Get("user_id")
+
+	var user db.User
+	var err error
+
+	if sessionUserID != nil {
+		var intUserID int64
+		intUserID, err = strconv.ParseInt(sessionUserID.(string), 10, 64)
+		if err == nil {
+			user, err = h.DB.GetUser(c.Request.Context(), intUserID)
+		}
+	}
+
+	if user.ID == 0 {
+		var req ResendVerificationRequest
+		if bindErr := c.ShouldBindJSON(&req); bindErr == nil && req.Email != "" {
+			user, err = h.DB.GetUserByEmail(c.Request.Context(), req.Email)
+		}
+	}
+
+	if user.ID == 0 || err != nil {
+		if sessionUserID == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Please log in or provide your registered email address"})
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		}
+		return
+	}
+
+	if user.EmailVerified {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is already verified"})
+		return
+	}
+
+	// Invalidate any existing verification tokens for this user before issuing a fresh one
+	_ = h.DB.DeleteVerificationTokensByUserID(c.Request.Context(), user.ID)
+
+	err = helpers.SendVerificationEmail(c, h.DB, int(user.ID), user.Email, user.Name)
+	if err != nil {
+		log.Printf("[ERROR] ResendVerificationEmail: failed to send verification email for user %d (%s): %v", user.ID, user.Email, err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to send verification email", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Verification link sent successfully. Please check your inbox."})
 }

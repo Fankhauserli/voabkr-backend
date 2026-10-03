@@ -162,7 +162,7 @@ LIMIT 1;
 
 -- name: ListDecks :many
 SELECT * FROM decks
-WHERE deleted_at > NOW()
+WHERE deleted_at > NOW() OR deleted_at IS NULL
 ORDER BY name;
 
 -- name: CreateDeck :one

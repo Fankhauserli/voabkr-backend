@@ -600,7 +600,7 @@ func (q *Queries) ListCards(ctx context.Context) ([]Card, error) {
 
 const listDecks = `-- name: ListDecks :many
 SELECT id, name, type, created_at, updated_at, deleted_at FROM decks
-WHERE deleted_at > NOW()
+WHERE deleted_at > NOW() OR deleted_at IS NULL
 ORDER BY name
 `
 

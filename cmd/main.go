@@ -48,6 +48,7 @@ func main() {
 		{
 			v1public.POST("/login", handler.Login)
 			v1public.POST("/register", handler.Register)
+			v1public.POST("/resend-verification", handler.ResendVerificationEmail)
 			v1public.POST("/verification/:token", handler.VerifyEmail)
 		}
 

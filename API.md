@@ -174,6 +174,25 @@ Verifies the user's email address using the one-time 64-character token sent by 
   - `400 Bad Request`: `{"error": "Token is required"}`, `{"error": "Invalid or expired token"}`, or `{"error": "Token has expired"}`
   - `500 Internal Server Error`: `{"error": "Failed to verify email"}`
 
+#### `POST /api/v1/resend-verification`
+Invalidates previous verification tokens and issues a fresh verification email link.
+- **Auth**: Optional (identifies user via active Redis session cookie, or via `email` in request body)
+- **JSON Request Body** (optional if authenticated):
+  ```json
+  {
+    "email": "user@example.com"
+  }
+  ```
+- **Example Request**:
+  ```bash
+  curl -X POST http://localhost:8080/api/v1/resend-verification -b cookies.txt
+  ```
+- **Responses**:
+  - `200 OK`: `{"message": "Verification link sent successfully. Please check your inbox."}`
+  - `400 Bad Request`: `{"error": "Please log in or provide your registered email address"}` or `{"error": "Email is already verified"}`
+  - `401 Unauthorized`: `{"error": "Unauthorized"}`
+  - `500 Internal Server Error`: `{"error": "Failed to send verification email"}`
+
 ---
 
 ### 3.3 User Profile (`/api/v1/user`)
