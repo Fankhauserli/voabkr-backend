@@ -22,6 +22,7 @@ The application requires configuration via environment variables for database co
 | `SMTP_USER` | No | — | Username for SMTP plain authentication (skipped if empty). | `notifications@example.com` |
 | `SMTP_PASS` | No | — | Password for SMTP plain authentication (skipped if empty). | `smtp-password` |
 | `FROM_EMAIL` | **Yes**\* | — | Sender email address for outgoing verification emails. | `no-reply@example.com` |
+| `FRONTEND_URL` | No | `http://localhost:5173` | Base URL of the frontend application for verification links. | `https://app.voabkr.com` |
 | `GIN_MODE` | No | `debug` | Gin framework operational mode (`debug`, `release`, `test`). | `release` |
 
 > \*) Required when user registration and email verification flows are triggered.

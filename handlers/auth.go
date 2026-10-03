@@ -103,7 +103,7 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	err = helpers.SendVerificationEmail(c, h.DB, int(createdUser.ID), createdUser.Email)
+	err = helpers.SendVerificationEmail(c, h.DB, int(createdUser.ID), createdUser.Email, createdUser.Name)
 	if err != nil {
 		log.Printf("[ERROR] Register: failed to send verification email for user %d (%s): %v", createdUser.ID, createdUser.Email, err)
 		// Clean up created user to avoid leaving an unusable orphan record

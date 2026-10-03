@@ -1,0 +1,17 @@
+voabkr — 보아봐
+Spaced Repetition for Korean Language Mastery
+
+{{ if .Name }}안녕하세요, {{ .Name }}님!{{ else }}안녕하세요!{{ end }}
+
+Thank you for creating an account on voabkr.
+
+Please verify your email address to secure your account, protect your custom decks, and begin your spaced-repetition study journey:
+
+{{ .VerificationURL }}
+
+(This verification link will expire in {{ .ExpireHours }} hours.)
+
+---
+If you did not create an account with voabkr, you can safely ignore this email.
+
+© {{ .Year }} voabkr. All rights reserved.

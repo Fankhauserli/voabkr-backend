@@ -22,6 +22,7 @@ func main() {
 		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
 	}))
+	router.Use(middleware.CORSMiddleware())
 
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
