@@ -300,6 +300,49 @@ func (q *Queries) GetCardsDueForReview(ctx context.Context, userID int64) ([]Car
 	return items, nil
 }
 
+const getCardsDueForReviewAfter = `-- name: GetCardsDueForReviewAfter :many
+SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
+WHERE id IN (
+    SELECT card_id FROM user_cards
+    WHERE user_id = $1 AND next_review_at <= NOW() AND next_review_at > $2
+)
+`
+
+type GetCardsDueForReviewAfterParams struct {
+	UserID       int64
+	NextReviewAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetCardsDueForReviewAfter(ctx context.Context, arg GetCardsDueForReviewAfterParams) ([]Card, error) {
+	rows, err := q.db.Query(ctx, getCardsDueForReviewAfter, arg.UserID, arg.NextReviewAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Card
+	for rows.Next() {
+		var i Card
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.KoreanWord,
+			&i.EnglishWord,
+			&i.Context,
+			&i.ExampleSentence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDeck = `-- name: GetDeck :one
 SELECT id, name, type, created_at, updated_at, deleted_at FROM decks
 WHERE id = $1
@@ -360,6 +403,36 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.DeletedAt,
 		&i.IsActive,
 		&i.EmailVerified,
+	)
+	return i, err
+}
+
+const getUserCard = `-- name: GetUserCard :one
+SELECT id, user_id, card_id, efactor, interval, repetitions, last_reviewed_at, next_review_at, created_at, updated_at, deleted_at FROM user_cards
+WHERE user_id = $1 AND card_id = $2
+LIMIT 1
+`
+
+type GetUserCardParams struct {
+	UserID int64
+	CardID int64
+}
+
+func (q *Queries) GetUserCard(ctx context.Context, arg GetUserCardParams) (UserCard, error) {
+	row := q.db.QueryRow(ctx, getUserCard, arg.UserID, arg.CardID)
+	var i UserCard
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CardID,
+		&i.Efactor,
+		&i.Interval,
+		&i.Repetitions,
+		&i.LastReviewedAt,
+		&i.NextReviewAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -440,49 +513,6 @@ func (q *Queries) GetUserCardsDueForReview(ctx context.Context, userID int64) ([
 	return items, nil
 }
 
-const getUserCardsDueForReviewAfter = `-- name: GetUserCardsDueForReviewAfter :many
-SELECT id, user_id, card_id, efactor, interval, repetitions, last_reviewed_at, next_review_at, created_at, updated_at, deleted_at FROM user_cards
-WHERE user_id = $1 AND next_review_at <= NOW() AND next_review_at > $2
-ORDER BY next_review_at ASC
-`
-
-type GetUserCardsDueForReviewAfterParams struct {
-	UserID       int64
-	NextReviewAt pgtype.Timestamptz
-}
-
-func (q *Queries) GetUserCardsDueForReviewAfter(ctx context.Context, arg GetUserCardsDueForReviewAfterParams) ([]UserCard, error) {
-	rows, err := q.db.Query(ctx, getUserCardsDueForReviewAfter, arg.UserID, arg.NextReviewAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []UserCard
-	for rows.Next() {
-		var i UserCard
-		if err := rows.Scan(
-			&i.ID,
-			&i.UserID,
-			&i.CardID,
-			&i.Efactor,
-			&i.Interval,
-			&i.Repetitions,
-			&i.LastReviewedAt,
-			&i.NextReviewAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getUserCardsDueForReviewCount = `-- name: GetUserCardsDueForReviewCount :one
 SELECT COUNT(*) FROM user_cards
 WHERE user_id = $1 AND next_review_at <= NOW()
@@ -493,6 +523,25 @@ func (q *Queries) GetUserCardsDueForReviewCount(ctx context.Context, userID int6
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getUserSettings = `-- name: GetUserSettings :one
+SELECT id, user_id, cards_per_day, created_at, updated_at FROM settings
+WHERE user_id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetUserSettings(ctx context.Context, userID int64) (Setting, error) {
+	row := q.db.QueryRow(ctx, getUserSettings, userID)
+	var i Setting
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CardsPerDay,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getVerificationToken = `-- name: GetVerificationToken :one

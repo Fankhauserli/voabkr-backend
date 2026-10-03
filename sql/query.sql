@@ -58,7 +58,7 @@ WHERE token = $1;
 DELETE FROM mail_verifications
 WHERE user_id = $1;
 
---- name: GetUserSettings :one
+-- name: GetUserSettings :one
 SELECT * FROM settings
 WHERE user_id = $1
 LIMIT 1;
@@ -69,7 +69,7 @@ SET cards_per_day = $2,
     updated_at = NOW()
 WHERE user_id = $1;
 
---- name: GetUserCard :one
+-- name: GetUserCard :one
 SELECT * FROM user_cards
 WHERE user_id = $1 AND card_id = $2
 LIMIT 1;
@@ -96,11 +96,12 @@ ORDER BY next_review_at ASC;
 SELECT COUNT(*) FROM user_cards
 WHERE user_id = $1 AND next_review_at <= NOW();
 
--- name: GetUserCardsDueForReviewAfter :many
-SELECT * FROM user_cards
-WHERE user_id = $1 AND next_review_at <= NOW() AND next_review_at > $2
-ORDER BY next_review_at ASC;
-
+-- name: GetCardsDueForReviewAfter :many
+SELECT * FROM cards
+WHERE id IN (
+    SELECT card_id FROM user_cards
+    WHERE user_id = $1 AND next_review_at <= NOW() AND next_review_at > $2
+);
 -- name: GetCardsDueForReview :many
 SELECT * FROM cards
 WHERE id IN
