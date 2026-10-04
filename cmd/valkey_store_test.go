@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/handlers"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/valkey-io/valkey-go"
@@ -231,3 +232,26 @@ func TestValkeyStoreSessionLifecycle(t *testing.T) {
 		t.Fatalf("expected /get after clear to return 401, got %d", w4.Code)
 	}
 }
+
+func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &handlers.Handler{}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("setupRouter panicked: %v", r)
+		}
+	}()
+
+	router := setupRouter(h)
+	if router == nil {
+		t.Fatal("expected non-nil router")
+	}
+
+	// Verify basic endpoints
+	routes := router.Routes()
+	if len(routes) == 0 {
+		t.Fatal("expected registered routes, got none")
+	}
+}
+

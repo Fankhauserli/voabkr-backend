@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func main() {
+func setupRouter(handler *handlers.Handler) *gin.Engine {
 	// Create a Gin router with logger and custom recovery to ensure panics log details and return JSON
 	router := gin.New()
 	router.Use(gin.Logger())
@@ -31,24 +31,6 @@ func main() {
 	router.GET("/readyz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-
-	ensureSessionMiddleware(router)
-
-	db, err := initDB()
-	if err != nil {
-		log.Fatalf("failed to initialize database: %v", err)
-	}
-
-	// Initialize two-level cache (L1 local memory + L2 Valkey cluster)
-	appCache, err := cache.NewFromEnv()
-	if err != nil {
-		log.Printf("[WARN] Failed to configure cache: %v", err)
-	} else {
-		defer appCache.Close()
-	}
-
-	// Create a new handler with database and cache
-	handler := handlers.NewHandler(db, appCache)
 
 	api := router.Group("/api")
 	{
@@ -83,8 +65,6 @@ func main() {
 			deckGroup := v1private.Group("/decks")
 			{
 				deckGroup.POST("/", handler.CreateDeck)
-				deckGroup.GET("/", handler.GetDecks)
-				deckGroup.GET("/:id", handler.GetDeckByID)
 				deckGroup.PUT("/:id", handler.UpdateDeck)
 				deckGroup.DELETE("/:id", handler.DeleteDeck)
 			}
@@ -92,8 +72,6 @@ func main() {
 			cardGroup := v1private.Group("/cards")
 			{
 				cardGroup.POST("/", handler.CreateCards)
-				cardGroup.GET("/", handler.GetCards)
-				cardGroup.GET("/:id", handler.GetCardByID)
 				cardGroup.PUT("/:id", handler.UpdateCard)
 				cardGroup.DELETE("/:id", handler.DeleteCard)
 			}
@@ -107,6 +85,29 @@ func main() {
 			}
 		}
 	}
+
+	return router
+}
+
+func main() {
+	db, err := initDB()
+	if err != nil {
+		log.Fatalf("failed to initialize database: %v", err)
+	}
+
+	// Initialize two-level cache (L1 local memory + L2 Valkey cluster)
+	appCache, err := cache.NewFromEnv()
+	if err != nil {
+		log.Printf("[WARN] Failed to configure cache: %v", err)
+	} else {
+		defer appCache.Close()
+	}
+
+	// Create a new handler with database and cache
+	handler := handlers.NewHandler(db, appCache)
+
+	router := setupRouter(handler)
+	ensureSessionMiddleware(router)
 
 	// Start server on port 8080
 	if err := router.Run(":8080"); err != nil {
