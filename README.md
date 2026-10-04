@@ -18,6 +18,9 @@ The application requires configuration via environment variables for database co
 | `REDIS_ADDR` | **Yes** | — | Redis server address (`host:port`) for session management. | `localhost:6379` |
 | `REDIS_PASSWORD` | **Yes** | — | Authentication password for Redis. | `secretredispass` |
 | `SESSION_SECRET` | **Yes** | — | Secret key used for signing session cookies. | `super-secret-session-key` |
+| `VALKEY_ADDRS` | No | `valkey-cluster:6379` | Valkey cluster seed addresses (comma-separated) for K8s. | `valkey-cluster.default.svc.cluster.local:6379` |
+| `VALKEY_PASSWORD` | No | — | Optional authentication password for Valkey cluster. | `valkeypassword` |
+| `VALKEY_DEFAULT_TTL_SEC` | No | `300` | Default cache TTL in seconds. | `300` |
 | `SMTP_ADDR` | **Yes**\* | — | SMTP server host and port (`host:port`) for sending emails. | `smtp.example.com:587` |
 | `SMTP_USER` | No | — | Username for SMTP plain authentication (skipped if empty). | `notifications@example.com` |
 | `SMTP_PASS` | No | — | Password for SMTP plain authentication (skipped if empty). | `smtp-password` |
@@ -50,7 +53,23 @@ The application requires configuration via environment variables for database co
   - **Description**: Cryptographic salt / secret string used to sign user session cookies (`cmd/session.go`).
   - **Example**: `64-char-random-hex-or-string`
 
-#### 3. Email Delivery (SMTP)
+#### 3. Valkey Cluster & Local Memory Cache
+The service uses a two-level cache for high throughput and low latency:
+- **Tier 1 (L1)**: In-memory local cache with TTL expiration for instant, zero-network-hop reads.
+- **Tier 2 (L2)**: Distributed Valkey Cluster deployed in Kubernetes with server-assisted client-side caching (`github.com/valkey-io/valkey-go`).
+- **Protobuf Efficiency**: All cached entities (cards, decks, settings, user profiles, and lists) are serialized and deserialized using compact binary Protocol Buffers (`proto.Marshal` / `proto.Unmarshal`) rather than JSON.
+
+- **`VALKEY_ADDRS` / `VALKEY_ADDR`**
+  - **Description**: Seed addresses (comma-separated or single) of the Valkey cluster in Kubernetes. Falls back to local in-memory caching if unreachable.
+  - **Example**: `valkey-cluster.default.svc.cluster.local:6379` or `valkey-0:6379,valkey-1:6379,valkey-2:6379`
+- **`VALKEY_PASSWORD`**
+  - **Description**: Authentication password for Valkey cluster nodes.
+- **`VALKEY_DEFAULT_TTL_SEC`**
+  - **Description**: Default cache TTL in seconds (default: `300`).
+- **`VALKEY_LOCAL_TTL_SEC`**
+  - **Description**: Local memory cache TTL in seconds (default: `120`).
+
+#### 4. Email Delivery (SMTP)
 
 - **`SMTP_ADDR`**
   - **Description**: Host and port of the outgoing mail server (`helpers/mail.go`).

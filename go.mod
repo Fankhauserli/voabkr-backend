@@ -9,6 +9,7 @@ require (
 	github.com/gomodule/redigo v1.9.3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
+	github.com/valkey-io/valkey-go v1.0.78
 	golang.org/x/crypto v0.55.0
 	google.golang.org/protobuf v1.36.12
 )
@@ -44,7 +45,6 @@ require (
 	github.com/sethvargo/go-retry v0.4.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
-	github.com/valkey-io/valkey-go v1.0.78 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.8.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.29.0 // indirect
