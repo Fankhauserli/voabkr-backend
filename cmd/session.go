@@ -1,65 +1,80 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/redis"
 	"github.com/gin-gonic/gin"
-	redigo "github.com/gomodule/redigo/redis"
+	"github.com/valkey-io/valkey-go"
 )
 
 func ensureSessionMiddleware(router *gin.Engine) {
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		log.Fatal("REDIS_ADDR environment variable is not set")
+	addrStr := os.Getenv("VALKEY_ADDRS")
+	if addrStr == "" {
+		addrStr = os.Getenv("VALKEY_ADDR")
+	}
+	if addrStr == "" {
+		addrStr = os.Getenv("REDIS_ADDR")
+	}
+	if addrStr == "" {
+		log.Fatal("Neither VALKEY_ADDRS nor REDIS_ADDR environment variable is set")
 	}
 
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	redisUsername := os.Getenv("REDIS_USERNAME")
+	var addrs []string
+	for _, p := range strings.Split(addrStr, ",") {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			addrs = append(addrs, trimmed)
+		}
+	}
+
+	password := os.Getenv("VALKEY_PASSWORD")
+	if password == "" {
+		password = os.Getenv("REDIS_PASSWORD")
+	}
+	username := os.Getenv("VALKEY_USERNAME")
+	if username == "" {
+		username = os.Getenv("REDIS_USERNAME")
+	}
 
 	secret := os.Getenv("SESSION_SECRET")
 	if secret == "" {
 		log.Fatal("SESSION_SECRET environment variable is not set")
 	}
 
-	// Test Redis connectivity at startup with a short timeout
-	dialOpts := []redigo.DialOption{
-		redigo.DialConnectTimeout(3 * time.Second),
-	}
-	if redisPassword != "" {
-		dialOpts = append(dialOpts, redigo.DialPassword(redisPassword))
-	}
-	if redisUsername != "" {
-		dialOpts = append(dialOpts, redigo.DialUsername(redisUsername))
+	clientOpt := valkey.ClientOption{
+		InitAddress: addrs,
+		Password:    password,
+		Username:    username,
+		Dialer: net.Dialer{
+			Timeout: 3 * time.Second,
+		},
 	}
 
-	testConn, err := redigo.Dial("tcp", redisAddr, dialOpts...)
+	client, err := valkey.NewClient(clientOpt)
 	if err != nil {
-		log.Printf("[WARNING] Could not connect to Redis at %s: %v. (Check REDIS_ADDR, REDIS_PASSWORD, and network)", redisAddr, err)
+		log.Fatalf("failed to create Valkey client for sessions: %v", err)
+	}
+
+	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if pingErr := client.Do(pingCtx, client.B().Ping().Build()).Error(); pingErr != nil {
+		log.Printf("[WARNING] Could not connect to Valkey at %v: %v. (Check VALKEY_ADDRS/REDIS_ADDR, password, and network)", addrs, pingErr)
 	} else {
-		if _, pingErr := testConn.Do("PING"); pingErr != nil {
-			log.Printf("[WARNING] Redis ping at %s failed: %v", redisAddr, pingErr)
-		} else {
-			log.Printf("[INFO] Successfully connected to Redis at %s", redisAddr)
-		}
-		testConn.Close()
+		log.Printf("[INFO] Successfully connected to Valkey (cluster-aware) for sessions at %v", addrs)
 	}
 
-	// Connect to Redis for session storage
-	store, err := redis.NewStore(10, "tcp", redisAddr, redisUsername, redisPassword, []byte(secret))
-	if err != nil {
-		panic(err)
-	}
-
+	store := NewValkeyStore(client, []byte(secret))
 	store.Options(sessions.Options{
 		Path:     "/",
-		MaxAge:   3600 * 24, // 24 hours (also syncs the Redis TTL)
-		HttpOnly: true,      // Blocks client-side JS access
-		Secure:   true,      // Set to true in production with HTTPS
+		MaxAge:   3600 * 24, // 24 hours
+		HttpOnly: true,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 	router.Use(sessions.Sessions("userSession", store))
