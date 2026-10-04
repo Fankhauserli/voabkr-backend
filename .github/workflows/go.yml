@@ -73,9 +73,13 @@ jobs:
           echo "version=${next}" >> "${GITHUB_OUTPUT}"
           echo "Using version ${next}"
 
-      - name: build sqlc
+      - name: Generate code (sqlc & protobuf)
         run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler
           go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install github.com/mitchellh/protoc-gen-go-json@latest
+          go install github.com/favadi/protoc-go-inject-tag@latest
           cd sql
           sqlc generate
           cd ..
