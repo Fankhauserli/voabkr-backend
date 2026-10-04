@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/Fankhauserli/voabkr-backend/cache"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/gin-gonic/gin"
@@ -38,8 +39,16 @@ func main() {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 
-	// Create a new handler with the database connection
-	handler := handlers.NewHandler(db)
+	// Initialize two-level cache (L1 local memory + L2 Valkey cluster)
+	appCache, err := cache.NewFromEnv()
+	if err != nil {
+		log.Printf("[WARN] Failed to configure cache: %v", err)
+	} else {
+		defer appCache.Close()
+	}
+
+	// Create a new handler with database and cache
+	handler := handlers.NewHandler(db, appCache)
 
 	api := router.Group("/api")
 	{

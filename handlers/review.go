@@ -36,7 +36,7 @@ func (h *Handler) CreateReview(c *gin.Context) {
 
 	_, err = h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
 		UserID: intUserID,
-		CardID: int64(req.CardID),
+		CardID: int64(req.CardId),
 	})
 	if err != nil {
 		log.Printf("[WARN] Review: failed to create Review: %v", err)
@@ -90,8 +90,8 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		}
 		reviewedCardIDs[c.ID] = true
 		returnCards = append(returnCards, types.Card{
-			ID:          uint(c.ID),
-			DeckID:      uint(c.DeckID),
+			Id:          uint32(c.ID),
+			DeckId:      uint32(c.DeckID),
 			KoreanWord:  c.KoreanWord,
 			EnglishWord: c.EnglishWord,
 			Context:     c.Context.String,
@@ -128,8 +128,8 @@ func (h *Handler) GetReviews(c *gin.Context) {
 			}
 			reviewedCardIDs[c.ID] = true
 			returnCards = append(returnCards, types.Card{
-				ID:          uint(c.ID),
-				DeckID:      uint(c.DeckID),
+				Id:          uint32(c.ID),
+				DeckId:      uint32(c.DeckID),
 				KoreanWord:  c.KoreanWord,
 				EnglishWord: c.EnglishWord,
 				Context:     c.Context.String,
@@ -357,8 +357,8 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 			continue
 		}
 		returnCards = append(returnCards, types.Card{
-			ID:          uint(c.ID),
-			DeckID:      uint(c.DeckID),
+			Id:          uint32(c.ID),
+			DeckId:      uint32(c.DeckID),
 			KoreanWord:  c.KoreanWord,
 			EnglishWord: c.EnglishWord,
 			Context:     c.Context.String,

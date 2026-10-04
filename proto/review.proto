@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package types;
+
+option go_package = "github.com/Fankhauserli/voabkr-backend/types";
+
+message Review {
+  // @gotags: json:"cardID"
+  uint32 card_id = 1 [json_name = "cardID"];
+}
+
+message ReviewRequest {
+  // @gotags: json:"ease"
+  int32 ease = 1 [json_name = "ease"];
+}

@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package types;
+
+option go_package = "github.com/Fankhauserli/voabkr-backend/types";
+
+message SettingsResponse {
+  // @gotags: json:"cardsPerDay"
+  uint32 cards_per_day = 1 [json_name = "cardsPerDay"];
+  // @gotags: json:"studyDirection"
+  string study_direction = 2 [json_name = "studyDirection"];
+  // @gotags: json:"scratchPadEnabled"
+  bool scratch_pad_enabled = 3 [json_name = "scratchPadEnabled"];
+}
+
+message UpdateSettingsRequest {
+  // @gotags: json:"cardsPerDay"
+  optional uint32 cards_per_day = 1 [json_name = "cardsPerDay"];
+  // @gotags: json:"studyDirection"
+  optional string study_direction = 2 [json_name = "studyDirection"];
+  // @gotags: json:"scratchPadEnabled"
+  optional bool scratch_pad_enabled = 3 [json_name = "scratchPadEnabled"];
+}

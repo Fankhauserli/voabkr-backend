@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
@@ -25,6 +27,15 @@ func (h *Handler) GetSettings(c *gin.Context) {
 		return
 	}
 
+	cacheKey := fmt.Sprintf("settings:user:%d", intUserID)
+	if h.Cache != nil {
+		var cachedSettings types.SettingsResponse
+		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedSettings); err == nil && found {
+			c.JSON(http.StatusOK, &cachedSettings)
+			return
+		}
+	}
+
 	settings, err := h.DB.GetUserSettings(c.Request.Context(), intUserID)
 	if err != nil {
 		settings, err = h.DB.CreateUserSettings(c.Request.Context(), intUserID)
@@ -41,12 +52,16 @@ func (h *Handler) GetSettings(c *gin.Context) {
 	}
 
 	response := types.SettingsResponse{
-		CardsPerDay:       uint(settings.CardsPerDay),
+		CardsPerDay:       uint32(settings.CardsPerDay),
 		StudyDirection:    studyDir,
 		ScratchPadEnabled: settings.ScratchPadEnabled,
 	}
 
-	c.JSON(http.StatusOK, response)
+	if h.Cache != nil {
+		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, &response, 10*time.Minute)
+	}
+
+	c.JSON(http.StatusOK, &response)
 }
 
 func (h *Handler) UpdateSettings(c *gin.Context) {
@@ -110,12 +125,19 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	updatedResponse := &types.SettingsResponse{
+		CardsPerDay:       uint32(cardsPerDay),
+		StudyDirection:    studyDirection,
+		ScratchPadEnabled: scratchPadEnabled,
+	}
+
+	if h.Cache != nil {
+		cacheKey := fmt.Sprintf("settings:user:%d", intUserID)
+		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, updatedResponse, 10*time.Minute)
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{
-		"message": "Settings updated",
-		"settings": types.SettingsResponse{
-			CardsPerDay:       uint(cardsPerDay),
-			StudyDirection:    studyDirection,
-			ScratchPadEnabled: scratchPadEnabled,
-		},
+		"message":  "Settings updated",
+		"settings": updatedResponse,
 	})
 }

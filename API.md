@@ -12,6 +12,9 @@ Comprehensive reference for the `voabkr-backend` HTTP API, including authenticat
   - `Content-Type: application/json`
   - `Accept: application/json`
 
+### Data Structures & Protocol Buffers
+All request and response data models are defined using Protocol Buffers v3 under [`proto/`](proto/) and compiled into [`types/`](types/) with JSON marshaling and unmarshaling support (`google.golang.org/protobuf/encoding/protojson` via `protoc-gen-go-json`).
+
 ### Session Authentication via Redis
 Authentication uses cookie-based sessions backed by Redis (`gin-contrib/sessions/redis`):
 
@@ -286,10 +289,12 @@ Retrieves settings for the authenticated user.
 #### `PUT /api/v1/user/settings`
 Updates settings for the authenticated user.
 - **Auth**: **Required**
-- **Go Request Struct** (`types.SettingsResponse`):
+- **Go Request Struct** (`types.UpdateSettingsRequest`):
   ```go
-  type SettingsResponse struct {
-      CardsPerDay uint `json:"cardsPerDay"`
+  type UpdateSettingsRequest struct {
+      CardsPerDay       *uint32 `json:"cardsPerDay,omitempty"`
+      StudyDirection    *string `json:"studyDirection,omitempty"`
+      ScratchPadEnabled *bool   `json:"scratchPadEnabled,omitempty"`
   }
   ```
 - **Example Request**:

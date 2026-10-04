@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package types;
+
+option go_package = "github.com/Fankhauserli/voabkr-backend/types";
+
+message UserRequest {
+  // @gotags: json:"name"
+  string name = 1 [json_name = "name"];
+  // @gotags: json:"email"
+  string email = 2 [json_name = "email"];
+}
+
+message UserResponse {
+  // @gotags: json:"id"
+  uint32 id = 1 [json_name = "id"];
+  // @gotags: json:"name"
+  string name = 2 [json_name = "name"];
+  // @gotags: json:"email"
+  string email = 3 [json_name = "email"];
+  // @gotags: json:"isActive"
+  bool is_active = 4 [json_name = "isActive"];
+  // @gotags: json:"isVerified"
+  bool is_verified = 5 [json_name = "isVerified"];
+}

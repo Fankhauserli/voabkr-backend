@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
@@ -12,12 +14,6 @@ import (
 )
 
 func (h *Handler) GetCards(c *gin.Context) {
-	cards, err := h.DB.ListCards(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
-		return
-	}
-
 	deckIDStr := c.Query("deck_id")
 	if deckIDStr == "" {
 		deckIDStr = c.Query("deckId")
@@ -30,20 +26,43 @@ func (h *Handler) GetCards(c *gin.Context) {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
 	}
 
-	returnCards := make([]types.Card, 0)
+	cacheKey := "cards:all"
+	if targetDeckID > 0 {
+		cacheKey = fmt.Sprintf("cards:deck:%d", targetDeckID)
+	}
+
+	if h.Cache != nil {
+		var cachedList types.CardList
+		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedList); err == nil && found {
+			c.JSON(http.StatusOK, cachedList.Cards)
+			return
+		}
+	}
+
+	cards, err := h.DB.ListCards(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	returnCards := make([]*types.Card, 0)
 
 	for _, c := range cards {
 		if targetDeckID > 0 && c.DeckID != targetDeckID {
 			continue
 		}
-		returnCards = append(returnCards, types.Card{
-			ID:          uint(c.ID),
-			DeckID:      uint(c.DeckID),
+		returnCards = append(returnCards, &types.Card{
+			Id:          uint32(c.ID),
+			DeckId:      uint32(c.DeckID),
 			KoreanWord:  c.KoreanWord,
 			EnglishWord: c.EnglishWord,
 			Context:     c.Context.String,
 			Example:     c.ExampleSentence.String,
 		})
+	}
+
+	if h.Cache != nil {
+		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, &types.CardList{Cards: returnCards}, 5*time.Minute)
 	}
 
 	c.JSON(http.StatusOK, returnCards)
@@ -58,7 +77,7 @@ func (h *Handler) CreateCards(c *gin.Context) {
 	}
 
 	_, err := h.DB.CreateCard(c.Request.Context(), db.CreateCardParams{
-		DeckID:          int64(req.DeckID),
+		DeckID:          int64(req.DeckId),
 		KoreanWord:      req.KoreanWord,
 		EnglishWord:     req.EnglishWord,
 		Context:         pgtype.Text{String: req.Context},
@@ -69,6 +88,10 @@ func (h *Handler) CreateCards(c *gin.Context) {
 		log.Printf("[WARN] Card: failed to create Card: %v", err)
 		respondWithError(c, http.StatusInternalServerError, "Failed to create Card", err)
 		return
+	}
+
+	if h.Cache != nil {
+		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Card created"})
@@ -91,6 +114,15 @@ func (h *Handler) GetCardByID(c *gin.Context) {
 		return
 	}
 
+	cacheKey := fmt.Sprintf("card:%d", intId)
+	if h.Cache != nil {
+		var cachedCard types.Card
+		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedCard); err == nil && found {
+			c.JSON(http.StatusOK, &cachedCard)
+			return
+		}
+	}
+
 	card, err := h.DB.GetCard(c.Request.Context(), intId)
 
 	if err != nil {
@@ -99,14 +131,20 @@ func (h *Handler) GetCardByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, types.Card{
-		ID:          uint(card.ID),
-		DeckID:      uint(card.DeckID),
+	resp := &types.Card{
+		Id:          uint32(card.ID),
+		DeckId:      uint32(card.DeckID),
 		KoreanWord:  card.KoreanWord,
 		EnglishWord: card.EnglishWord,
 		Context:     card.Context.String,
 		Example:     card.ExampleSentence.String,
-	})
+	}
+
+	if h.Cache != nil {
+		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, resp, 5*time.Minute)
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *Handler) UpdateCard(c *gin.Context) {
@@ -134,7 +172,7 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 
 	err = h.DB.UpdateCard(c.Request.Context(), db.UpdateCardParams{
 		ID:              intId,
-		DeckID:          int64(req.DeckID),
+		DeckID:          int64(req.DeckId),
 		KoreanWord:      req.KoreanWord,
 		EnglishWord:     req.EnglishWord,
 		Context:         pgtype.Text{String: req.Context},
@@ -145,6 +183,11 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 		log.Printf("[WARN] Card: failed to update Card: %v", err)
 		respondWithError(c, http.StatusInternalServerError, "Failed to update Card", err)
 		return
+	}
+
+	if h.Cache != nil {
+		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("card:%d", intId))
+		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Card updated"})
@@ -174,6 +217,10 @@ func (h *Handler) DeleteCard(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"message": "Card deleted"})
+	if h.Cache != nil {
+		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("card:%d", intId))
+		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
+	}
 
+	c.JSON(http.StatusAccepted, gin.H{"message": "Card deleted"})
 }

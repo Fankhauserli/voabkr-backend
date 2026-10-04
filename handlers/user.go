@@ -31,14 +31,14 @@ func (h *Handler) GetUserProfile(c *gin.Context) {
 	}
 
 	response := types.UserResponse{
-		ID:         uint(user.ID),
+		Id:         uint32(user.ID),
 		Name:       user.Name,
 		Email:      user.Email,
 		IsVerified: user.EmailVerified,
 		IsActive:   user.IsActive,
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, &response)
 }
 
 func (h *Handler) UpdateUserProfile(c *gin.Context) {

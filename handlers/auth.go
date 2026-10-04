@@ -179,10 +179,6 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
 }
 
-type ResendVerificationRequest struct {
-	Email string `json:"email"`
-}
-
 func (h *Handler) ResendVerificationEmail(c *gin.Context) {
 	session := sessions.Default(c)
 	sessionUserID := session.Get("user_id")
@@ -199,7 +195,7 @@ func (h *Handler) ResendVerificationEmail(c *gin.Context) {
 	}
 
 	if user.ID == 0 {
-		var req ResendVerificationRequest
+		var req types.ResendVerificationRequest
 		if bindErr := c.ShouldBindJSON(&req); bindErr == nil && req.Email != "" {
 			user, err = h.DB.GetUserByEmail(c.Request.Context(), req.Email)
 		}

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package types;
+
+option go_package = "github.com/Fankhauserli/voabkr-backend/types";
+
+message LoginRequestBody {
+  // @gotags: json:"email" binding:"required,email"
+  string email = 1 [json_name = "email"];
+  // @gotags: json:"password" binding:"required"
+  string password = 2 [json_name = "password"];
+}
+
+message RegisterRequestBody {
+  // @gotags: json:"email" binding:"required,email"
+  string email = 1 [json_name = "email"];
+  // @gotags: json:"password" binding:"required"
+  string password = 2 [json_name = "password"];
+  // @gotags: json:"name" binding:"required"
+  string name = 3 [json_name = "name"];
+}
+
+message ResendVerificationRequest {
+  // @gotags: json:"email"
+  string email = 1 [json_name = "email"];
+}
