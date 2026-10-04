@@ -50,6 +50,12 @@ func main() {
 			v1public.POST("/register", handler.Register)
 			v1public.POST("/resend-verification", handler.ResendVerificationEmail)
 			v1public.POST("/verification/:token", handler.VerifyEmail)
+
+			// Public read-only access to decks and cards
+			v1public.GET("/decks/", handler.GetDecks)
+			v1public.GET("/decks/:id", handler.GetDeckByID)
+			v1public.GET("/cards/", handler.GetCards)
+			v1public.GET("/cards/:id", handler.GetCardByID)
 		}
 
 		v1private := api.Group("/v1")
