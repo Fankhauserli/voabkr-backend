@@ -237,13 +237,28 @@ func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := &handlers.Handler{}
 
+	server := newMockRespServer(t)
+	defer server.Close()
+
+	client, err := valkey.NewClient(valkey.ClientOption{
+		InitAddress:  []string{server.Addr()},
+		AlwaysRESP2:  true,
+		DisableCache: true,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	defer client.Close()
+
+	store := NewValkeyStore(client, []byte("test-secret-key-32b"))
+
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("setupRouter panicked: %v", r)
 		}
 	}()
 
-	router := setupRouter(h)
+	router := setupRouter(h, store)
 	if router == nil {
 		t.Fatal("expected non-nil router")
 	}
@@ -252,6 +267,15 @@ func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
 	routes := router.Routes()
 	if len(routes) == 0 {
 		t.Fatal("expected registered routes, got none")
+	}
+
+	// Test request to /api/v1/login to verify session middleware is present and does not panic with missing key
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code == http.StatusInternalServerError && strings.Contains(w.Body.String(), "key github.com/gin-contrib/sessions does not exist") {
+		t.Fatalf("session middleware was not registered on /api/v1/login: %s", w.Body.String())
 	}
 }
 

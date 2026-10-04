@@ -10,11 +10,10 @@ import (
 	"time"
 
 	"github.com/gin-contrib/sessions"
-	"github.com/gin-gonic/gin"
 	"github.com/valkey-io/valkey-go"
 )
 
-func ensureSessionMiddleware(router *gin.Engine) {
+func initSessionStore() sessions.Store {
 	addrStr := os.Getenv("VALKEY_ADDRS")
 	if addrStr == "" {
 		addrStr = os.Getenv("VALKEY_ADDR")
@@ -77,5 +76,5 @@ func ensureSessionMiddleware(router *gin.Engine) {
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	router.Use(sessions.Sessions("userSession", store))
+	return store
 }

@@ -8,10 +8,11 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/cache"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
-func setupRouter(handler *handlers.Handler) *gin.Engine {
+func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.Engine {
 	// Create a Gin router with logger and custom recovery to ensure panics log details and return JSON
 	router := gin.New()
 	router.Use(gin.Logger())
@@ -24,6 +25,9 @@ func setupRouter(handler *handlers.Handler) *gin.Engine {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
 	}))
 	router.Use(middleware.CORSMiddleware())
+	if sessionStore != nil {
+		router.Use(sessions.Sessions("userSession", sessionStore))
+	}
 
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -106,8 +110,8 @@ func main() {
 	// Create a new handler with database and cache
 	handler := handlers.NewHandler(db, appCache)
 
-	router := setupRouter(handler)
-	ensureSessionMiddleware(router)
+	sessionStore := initSessionStore()
+	router := setupRouter(handler, sessionStore)
 
 	// Start server on port 8080
 	if err := router.Run(":8080"); err != nil {
