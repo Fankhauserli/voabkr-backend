@@ -24,3 +24,13 @@ message ResendVerificationRequest {
   // @gotags: json:"email"
   string email = 1 [json_name = "email"];
 }
+
+message ForgotPasswordRequest {
+  // @gotags: json:"email" binding:"required,email"
+  string email = 1 [json_name = "email"];
+}
+
+message ResetPasswordRequest {
+  // @gotags: json:"password" binding:"required,min=8"
+  string password = 1 [json_name = "password"];
+}

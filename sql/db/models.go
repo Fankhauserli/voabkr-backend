@@ -66,12 +66,25 @@ type Card struct {
 }
 
 type Deck struct {
-	ID        int64
-	Name      string
-	Type      DeckType
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
-	DeletedAt pgtype.Timestamptz
+	ID         int64
+	Name       string
+	Type       DeckType
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+	DeletedAt  pgtype.Timestamptz
+	OwnerID    pgtype.Int8
+	IsPublic   bool
+	ShareToken pgtype.Text
+}
+
+type DeckShare struct {
+	ID           int64
+	DeckID       int64
+	UserID       pgtype.Int8
+	InvitedEmail pgtype.Text
+	Permission   string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type MailVerification struct {
@@ -80,6 +93,24 @@ type MailVerification struct {
 	Token     string
 	CreatedAt pgtype.Timestamptz
 	ExpiresAt pgtype.Timestamptz
+}
+
+type PasswordReset struct {
+	ID        int64
+	UserID    int64
+	Token     string
+	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+}
+
+type ReviewLog struct {
+	ID         int64
+	UserID     int64
+	CardID     int64
+	Rating     int32
+	Interval   int32
+	Efactor    float64
+	ReviewedAt pgtype.Timestamptz
 }
 
 type Setting struct {

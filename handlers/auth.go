@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -14,6 +16,7 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func respondWithError(c *gin.Context, code int, message string, err error) {
@@ -227,3 +230,76 @@ func (h *Handler) ResendVerificationEmail(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Verification link sent successfully. Please check your inbox."})
 }
+
+func (h *Handler) ForgotPassword(c *gin.Context) {
+	var req types.ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	user, err := h.DB.GetUserByEmail(c.Request.Context(), req.Email)
+	if err == nil && user.ID > 0 {
+		_ = h.DB.DeletePasswordResetTokensByUserID(c.Request.Context(), user.ID)
+
+		b := make([]byte, 24)
+		if _, randErr := rand.Read(b); randErr == nil {
+			token := "sec_rst_" + hex.EncodeToString(b)
+			expiresAt := time.Now().Add(1 * time.Hour)
+			_, _ = h.DB.CreatePasswordResetToken(c.Request.Context(), db.CreatePasswordResetTokenParams{
+				UserID:    user.ID,
+				Token:     token,
+				ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
+			})
+			log.Printf("[INFO] ForgotPassword: created password reset token for %s", user.Email)
+		}
+	}
+
+	// Always return OK to avoid email enumeration
+	c.JSON(http.StatusOK, gin.H{"message": "If an account exists with this email, a reset link has been dispatched."})
+}
+
+func (h *Handler) ResetPassword(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing reset token"})
+		return
+	}
+
+	var req types.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	if len(req.Password) < 8 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 8 characters long"})
+		return
+	}
+
+	resetRecord, err := h.DB.GetPasswordResetToken(c.Request.Context(), token)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired reset token"})
+		return
+	}
+
+	hash, err := helpers.HashPassword(req.Password)
+	if err != nil {
+		respondWithError(c, http.StatusInternalServerError, "Failed to hash password", err)
+		return
+	}
+
+	err = h.DB.UpdateUserPassword(c.Request.Context(), db.UpdateUserPasswordParams{
+		ID:           resetRecord.UserID,
+		PasswordHash: hash,
+	})
+	if err != nil {
+		respondWithError(c, http.StatusInternalServerError, "Failed to update password", err)
+		return
+	}
+
+	_ = h.DB.DeletePasswordResetToken(c.Request.Context(), token)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Password successfully reset. You may now log in."})
+}
+

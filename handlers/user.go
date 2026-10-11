@@ -92,3 +92,38 @@ func (h *Handler) UpdateUserProfile(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "User profile updated successfully"})
 }
+
+func (h *Handler) DeleteAccount(c *gin.Context) {
+	session := sessions.Default(c)
+	userID := session.Get("user_id")
+	if userID == nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Completely erase user account and records (GDPR Article 17 / Swiss revDSG right to erasure)
+	err = h.DB.HardDeleteUser(c.Request.Context(), intUserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete account"})
+		return
+	}
+
+	if h.Cache != nil {
+		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("user:profile:%d", intUserID))
+		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
+		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
+	}
+
+	session.Clear()
+	session.Options(sessions.Options{MaxAge: -1, Path: "/"})
+	_ = session.Save()
+
+	c.JSON(http.StatusOK, gin.H{"message": "Account successfully erased"})
+}
+

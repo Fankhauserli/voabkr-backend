@@ -28,9 +28,17 @@ type Deck struct {
 	// @gotags: json:"name"
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name"`
 	// @gotags: json:"type"
-	Type          string `protobuf:"bytes,3,opt,name=type,proto3" json:"type"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Type string `protobuf:"bytes,3,opt,name=type,proto3" json:"type"`
+	// @gotags: json:"ownerId,omitempty"
+	OwnerId uint32 `protobuf:"varint,4,opt,name=owner_id,json=ownerId,proto3" json:"ownerId,omitempty"`
+	// @gotags: json:"isPublic"
+	IsPublic bool `protobuf:"varint,5,opt,name=is_public,json=isPublic,proto3" json:"isPublic"`
+	// @gotags: json:"shareToken,omitempty"
+	ShareToken string `protobuf:"bytes,6,opt,name=share_token,json=shareToken,proto3" json:"shareToken,omitempty"`
+	// @gotags: json:"userAccessRole,omitempty"
+	UserAccessRole string `protobuf:"bytes,7,opt,name=user_access_role,json=userAccessRole,proto3" json:"userAccessRole,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Deck) Reset() {
@@ -84,12 +92,42 @@ func (x *Deck) GetType() string {
 	return ""
 }
 
+func (x *Deck) GetOwnerId() uint32 {
+	if x != nil {
+		return x.OwnerId
+	}
+	return 0
+}
+
+func (x *Deck) GetIsPublic() bool {
+	if x != nil {
+		return x.IsPublic
+	}
+	return false
+}
+
+func (x *Deck) GetShareToken() string {
+	if x != nil {
+		return x.ShareToken
+	}
+	return ""
+}
+
+func (x *Deck) GetUserAccessRole() string {
+	if x != nil {
+		return x.UserAccessRole
+	}
+	return ""
+}
+
 type DeckRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// @gotags: json:"name"
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name"`
 	// @gotags: json:"type"
-	Type          string `protobuf:"bytes,2,opt,name=type,proto3" json:"type"`
+	Type string `protobuf:"bytes,2,opt,name=type,proto3" json:"type"`
+	// @gotags: json:"isPublic"
+	IsPublic      bool `protobuf:"varint,3,opt,name=is_public,json=isPublic,proto3" json:"isPublic"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -138,6 +176,13 @@ func (x *DeckRequest) GetType() string {
 	return ""
 }
 
+func (x *DeckRequest) GetIsPublic() bool {
+	if x != nil {
+		return x.IsPublic
+	}
+	return false
+}
+
 type DeckList struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// @gotags: json:"decks"
@@ -183,21 +228,144 @@ func (x *DeckList) GetDecks() []*Deck {
 	return nil
 }
 
+type ShareDeckRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// @gotags: json:"email,omitempty"
+	Email string `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	// @gotags: json:"permission,omitempty"
+	Permission    string `protobuf:"bytes,2,opt,name=permission,proto3" json:"permission,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShareDeckRequest) Reset() {
+	*x = ShareDeckRequest{}
+	mi := &file_deck_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShareDeckRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShareDeckRequest) ProtoMessage() {}
+
+func (x *ShareDeckRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deck_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShareDeckRequest.ProtoReflect.Descriptor instead.
+func (*ShareDeckRequest) Descriptor() ([]byte, []int) {
+	return file_deck_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ShareDeckRequest) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *ShareDeckRequest) GetPermission() string {
+	if x != nil {
+		return x.Permission
+	}
+	return ""
+}
+
+type DeckShareResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// @gotags: json:"shareToken,omitempty"
+	ShareToken string `protobuf:"bytes,1,opt,name=share_token,json=shareToken,proto3" json:"shareToken,omitempty"`
+	// @gotags: json:"message,omitempty"
+	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeckShareResponse) Reset() {
+	*x = DeckShareResponse{}
+	mi := &file_deck_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeckShareResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeckShareResponse) ProtoMessage() {}
+
+func (x *DeckShareResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_deck_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeckShareResponse.ProtoReflect.Descriptor instead.
+func (*DeckShareResponse) Descriptor() ([]byte, []int) {
+	return file_deck_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DeckShareResponse) GetShareToken() string {
+	if x != nil {
+		return x.ShareToken
+	}
+	return ""
+}
+
+func (x *DeckShareResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_deck_proto protoreflect.FileDescriptor
 
 const file_deck_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"deck.proto\x12\x05types\">\n" +
+	"deck.proto\x12\x05types\"\xc1\x01\n" +
 	"\x04Deck\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04type\x18\x03 \x01(\tR\x04type\"5\n" +
+	"\x04type\x18\x03 \x01(\tR\x04type\x12\x19\n" +
+	"\bowner_id\x18\x04 \x01(\rR\aownerId\x12\x1b\n" +
+	"\tis_public\x18\x05 \x01(\bR\bisPublic\x12\x1f\n" +
+	"\vshare_token\x18\x06 \x01(\tR\n" +
+	"shareToken\x12(\n" +
+	"\x10user_access_role\x18\a \x01(\tR\x0euserAccessRole\"R\n" +
 	"\vDeckRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04type\x18\x02 \x01(\tR\x04type\"-\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1b\n" +
+	"\tis_public\x18\x03 \x01(\bR\bisPublic\"-\n" +
 	"\bDeckList\x12!\n" +
-	"\x05decks\x18\x01 \x03(\v2\v.types.DeckR\x05decksB.Z,github.com/Fankhauserli/voabkr-backend/typesb\x06proto3"
+	"\x05decks\x18\x01 \x03(\v2\v.types.DeckR\x05decks\"H\n" +
+	"\x10ShareDeckRequest\x12\x14\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1e\n" +
+	"\n" +
+	"permission\x18\x02 \x01(\tR\n" +
+	"permission\"N\n" +
+	"\x11DeckShareResponse\x12\x1f\n" +
+	"\vshare_token\x18\x01 \x01(\tR\n" +
+	"shareToken\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessageB.Z,github.com/Fankhauserli/voabkr-backend/typesb\x06proto3"
 
 var (
 	file_deck_proto_rawDescOnce sync.Once
@@ -211,11 +379,13 @@ func file_deck_proto_rawDescGZIP() []byte {
 	return file_deck_proto_rawDescData
 }
 
-var file_deck_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_deck_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_deck_proto_goTypes = []any{
-	(*Deck)(nil),        // 0: types.Deck
-	(*DeckRequest)(nil), // 1: types.DeckRequest
-	(*DeckList)(nil),    // 2: types.DeckList
+	(*Deck)(nil),              // 0: types.Deck
+	(*DeckRequest)(nil),       // 1: types.DeckRequest
+	(*DeckList)(nil),          // 2: types.DeckList
+	(*ShareDeckRequest)(nil),  // 3: types.ShareDeckRequest
+	(*DeckShareResponse)(nil), // 4: types.DeckShareResponse
 }
 var file_deck_proto_depIdxs = []int32{
 	0, // 0: types.DeckList.decks:type_name -> types.Deck
@@ -237,7 +407,7 @@ func file_deck_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deck_proto_rawDesc), len(file_deck_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

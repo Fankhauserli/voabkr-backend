@@ -45,10 +45,13 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 			v1public.POST("/register", handler.Register)
 			v1public.POST("/resend-verification", handler.ResendVerificationEmail)
 			v1public.POST("/verification/:token", handler.VerifyEmail)
+			v1public.POST("/forgot-password", handler.ForgotPassword)
+			v1public.POST("/reset-password/:token", handler.ResetPassword)
 
 			// Public read-only access to decks and cards
 			v1public.GET("/decks/", handler.GetDecks)
 			v1public.GET("/decks/:id", handler.GetDeckByID)
+			v1public.GET("/decks/shared/:token", handler.GetSharedDeckByToken)
 			v1public.GET("/cards/", handler.GetCards)
 			v1public.GET("/cards/:id", handler.GetCardByID)
 		}
@@ -62,6 +65,7 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 			{
 				userGroup.GET("/profile", handler.GetUserProfile)
 				userGroup.PUT("/profile", handler.UpdateUserProfile)
+				userGroup.DELETE("", handler.DeleteAccount)
 				userGroup.GET("/settings", handler.GetSettings)
 				userGroup.PUT("/settings", handler.UpdateSettings)
 			}
@@ -71,6 +75,9 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 				deckGroup.POST("/", handler.CreateDeck)
 				deckGroup.PUT("/:id", handler.UpdateDeck)
 				deckGroup.DELETE("/:id", handler.DeleteDeck)
+				deckGroup.POST("/:id/share", handler.ShareDeck)
+				deckGroup.DELETE("/:id/share/:user_id", handler.RevokeDeckShare)
+				deckGroup.POST("/shared/:token/join", handler.JoinSharedDeck)
 			}
 
 			cardGroup := v1private.Group("/cards")

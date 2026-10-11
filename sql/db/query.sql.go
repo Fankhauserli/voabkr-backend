@@ -53,20 +53,29 @@ func (q *Queries) CreateCard(ctx context.Context, arg CreateCardParams) (Card, e
 
 const createDeck = `-- name: CreateDeck :one
 INSERT INTO decks (
-  name, type
+  name, type, owner_id, is_public, share_token
 ) VALUES (
-  $1, $2
+  $1, $2, $3, $4, $5
 )
-RETURNING id, name, type, created_at, updated_at, deleted_at
+RETURNING id, name, type, created_at, updated_at, deleted_at, owner_id, is_public, share_token
 `
 
 type CreateDeckParams struct {
-	Name string
-	Type DeckType
+	Name       string
+	Type       DeckType
+	OwnerID    pgtype.Int8
+	IsPublic   bool
+	ShareToken pgtype.Text
 }
 
 func (q *Queries) CreateDeck(ctx context.Context, arg CreateDeckParams) (Deck, error) {
-	row := q.db.QueryRow(ctx, createDeck, arg.Name, arg.Type)
+	row := q.db.QueryRow(ctx, createDeck,
+		arg.Name,
+		arg.Type,
+		arg.OwnerID,
+		arg.IsPublic,
+		arg.ShareToken,
+	)
 	var i Deck
 	err := row.Scan(
 		&i.ID,
@@ -75,6 +84,77 @@ func (q *Queries) CreateDeck(ctx context.Context, arg CreateDeckParams) (Deck, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.OwnerID,
+		&i.IsPublic,
+		&i.ShareToken,
+	)
+	return i, err
+}
+
+const createDeckShare = `-- name: CreateDeckShare :one
+INSERT INTO deck_shares (
+  deck_id, user_id, invited_email, permission
+) VALUES (
+  $1, $2, $3, $4
+)
+ON CONFLICT (deck_id, user_id)
+DO UPDATE SET
+  permission = $4,
+  updated_at = NOW()
+RETURNING id, deck_id, user_id, invited_email, permission, created_at, updated_at
+`
+
+type CreateDeckShareParams struct {
+	DeckID       int64
+	UserID       pgtype.Int8
+	InvitedEmail pgtype.Text
+	Permission   string
+}
+
+func (q *Queries) CreateDeckShare(ctx context.Context, arg CreateDeckShareParams) (DeckShare, error) {
+	row := q.db.QueryRow(ctx, createDeckShare,
+		arg.DeckID,
+		arg.UserID,
+		arg.InvitedEmail,
+		arg.Permission,
+	)
+	var i DeckShare
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.UserID,
+		&i.InvitedEmail,
+		&i.Permission,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createPasswordResetToken = `-- name: CreatePasswordResetToken :one
+INSERT INTO password_resets (
+  user_id, token, expires_at
+) VALUES (
+  $1, $2, $3
+)
+RETURNING id, user_id, token, created_at, expires_at
+`
+
+type CreatePasswordResetTokenParams struct {
+	UserID    int64
+	Token     string
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordReset, error) {
+	row := q.db.QueryRow(ctx, createPasswordResetToken, arg.UserID, arg.Token, arg.ExpiresAt)
+	var i PasswordReset
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Token,
+		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -215,6 +295,41 @@ WHERE id = $1
 
 func (q *Queries) DeleteDeck(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, deleteDeck, id)
+	return err
+}
+
+const deleteDeckShare = `-- name: DeleteDeckShare :exec
+DELETE FROM deck_shares
+WHERE deck_id = $1 AND user_id = $2
+`
+
+type DeleteDeckShareParams struct {
+	DeckID int64
+	UserID pgtype.Int8
+}
+
+func (q *Queries) DeleteDeckShare(ctx context.Context, arg DeleteDeckShareParams) error {
+	_, err := q.db.Exec(ctx, deleteDeckShare, arg.DeckID, arg.UserID)
+	return err
+}
+
+const deletePasswordResetToken = `-- name: DeletePasswordResetToken :exec
+DELETE FROM password_resets
+WHERE token = $1
+`
+
+func (q *Queries) DeletePasswordResetToken(ctx context.Context, token string) error {
+	_, err := q.db.Exec(ctx, deletePasswordResetToken, token)
+	return err
+}
+
+const deletePasswordResetTokensByUserID = `-- name: DeletePasswordResetTokensByUserID :exec
+DELETE FROM password_resets
+WHERE user_id = $1
+`
+
+func (q *Queries) DeletePasswordResetTokensByUserID(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, deletePasswordResetTokensByUserID, userID)
 	return err
 }
 
@@ -368,8 +483,8 @@ func (q *Queries) GetCardsDueForReviewAfter(ctx context.Context, arg GetCardsDue
 }
 
 const getDeck = `-- name: GetDeck :one
-SELECT id, name, type, created_at, updated_at, deleted_at FROM decks
-WHERE id = $1
+SELECT id, name, type, created_at, updated_at, deleted_at, owner_id, is_public, share_token FROM decks
+WHERE id = $1 AND deleted_at IS NULL
 LIMIT 1
 `
 
@@ -383,6 +498,77 @@ func (q *Queries) GetDeck(ctx context.Context, id int64) (Deck, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.OwnerID,
+		&i.IsPublic,
+		&i.ShareToken,
+	)
+	return i, err
+}
+
+const getDeckByShareToken = `-- name: GetDeckByShareToken :one
+SELECT id, name, type, created_at, updated_at, deleted_at, owner_id, is_public, share_token FROM decks
+WHERE share_token = $1 AND deleted_at IS NULL
+LIMIT 1
+`
+
+func (q *Queries) GetDeckByShareToken(ctx context.Context, shareToken pgtype.Text) (Deck, error) {
+	row := q.db.QueryRow(ctx, getDeckByShareToken, shareToken)
+	var i Deck
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.OwnerID,
+		&i.IsPublic,
+		&i.ShareToken,
+	)
+	return i, err
+}
+
+const getDeckShare = `-- name: GetDeckShare :one
+SELECT id, deck_id, user_id, invited_email, permission, created_at, updated_at FROM deck_shares
+WHERE deck_id = $1 AND user_id = $2
+LIMIT 1
+`
+
+type GetDeckShareParams struct {
+	DeckID int64
+	UserID pgtype.Int8
+}
+
+func (q *Queries) GetDeckShare(ctx context.Context, arg GetDeckShareParams) (DeckShare, error) {
+	row := q.db.QueryRow(ctx, getDeckShare, arg.DeckID, arg.UserID)
+	var i DeckShare
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.UserID,
+		&i.InvitedEmail,
+		&i.Permission,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPasswordResetToken = `-- name: GetPasswordResetToken :one
+SELECT id, user_id, token, created_at, expires_at FROM password_resets
+WHERE token = $1 AND expires_at > NOW()
+LIMIT 1
+`
+
+func (q *Queries) GetPasswordResetToken(ctx context.Context, token string) (PasswordReset, error) {
+	row := q.db.QueryRow(ctx, getPasswordResetToken, token)
+	var i PasswordReset
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Token,
+		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -589,6 +775,16 @@ func (q *Queries) GetVerificationToken(ctx context.Context, token string) (MailV
 	return i, err
 }
 
+const hardDeleteUser = `-- name: HardDeleteUser :exec
+DELETE FROM users
+WHERE id = $1
+`
+
+func (q *Queries) HardDeleteUser(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, hardDeleteUser, id)
+	return err
+}
+
 const listCards = `-- name: ListCards :many
 SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
 WHERE deleted_at > NOW() OR deleted_at IS NULL
@@ -624,9 +820,43 @@ func (q *Queries) ListCards(ctx context.Context) ([]Card, error) {
 	return items, nil
 }
 
+const listDeckShares = `-- name: ListDeckShares :many
+SELECT id, deck_id, user_id, invited_email, permission, created_at, updated_at FROM deck_shares
+WHERE deck_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListDeckShares(ctx context.Context, deckID int64) ([]DeckShare, error) {
+	rows, err := q.db.Query(ctx, listDeckShares, deckID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DeckShare
+	for rows.Next() {
+		var i DeckShare
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.UserID,
+			&i.InvitedEmail,
+			&i.Permission,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDecks = `-- name: ListDecks :many
-SELECT id, name, type, created_at, updated_at, deleted_at FROM decks
-WHERE deleted_at > NOW() OR deleted_at IS NULL
+SELECT id, name, type, created_at, updated_at, deleted_at, owner_id, is_public, share_token FROM decks
+WHERE deleted_at IS NULL
 ORDER BY name
 `
 
@@ -646,6 +876,106 @@ func (q *Queries) ListDecks(ctx context.Context) ([]Deck, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.OwnerID,
+			&i.IsPublic,
+			&i.ShareToken,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDecksForUser = `-- name: ListDecksForUser :many
+SELECT DISTINCT d.id, d.name, d.type, d.owner_id, d.is_public, d.share_token, d.created_at, d.updated_at, d.deleted_at,
+  CASE
+    WHEN d.owner_id = $1 THEN 'owner'
+    WHEN s.permission IS NOT NULL THEN s.permission
+    ELSE 'public'
+  END AS user_access_role
+FROM decks d
+LEFT JOIN deck_shares s ON d.id = s.deck_id AND s.user_id = $1
+WHERE d.deleted_at IS NULL AND (
+    d.is_public = TRUE
+    OR d.owner_id = $1
+    OR s.user_id = $1
+)
+ORDER BY d.name
+`
+
+type ListDecksForUserRow struct {
+	ID             int64
+	Name           string
+	Type           DeckType
+	OwnerID        pgtype.Int8
+	IsPublic       bool
+	ShareToken     pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	DeletedAt      pgtype.Timestamptz
+	UserAccessRole string
+}
+
+func (q *Queries) ListDecksForUser(ctx context.Context, ownerID pgtype.Int8) ([]ListDecksForUserRow, error) {
+	rows, err := q.db.Query(ctx, listDecksForUser, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDecksForUserRow
+	for rows.Next() {
+		var i ListDecksForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.OwnerID,
+			&i.IsPublic,
+			&i.ShareToken,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.UserAccessRole,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublicDecks = `-- name: ListPublicDecks :many
+SELECT id, name, type, created_at, updated_at, deleted_at, owner_id, is_public, share_token FROM decks
+WHERE is_public = TRUE AND deleted_at IS NULL
+ORDER BY name
+`
+
+func (q *Queries) ListPublicDecks(ctx context.Context) ([]Deck, error) {
+	rows, err := q.db.Query(ctx, listPublicDecks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Deck
+	for rows.Next() {
+		var i Deck
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.OwnerID,
+			&i.IsPublic,
+			&i.ShareToken,
 		); err != nil {
 			return nil, err
 		}
@@ -692,6 +1022,23 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const setDeckShareToken = `-- name: SetDeckShareToken :exec
+UPDATE decks
+SET share_token = $2,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+type SetDeckShareTokenParams struct {
+	ID         int64
+	ShareToken pgtype.Text
+}
+
+func (q *Queries) SetDeckShareToken(ctx context.Context, arg SetDeckShareTokenParams) error {
+	_, err := q.db.Exec(ctx, setDeckShareToken, arg.ID, arg.ShareToken)
+	return err
+}
+
 const updateCard = `-- name: UpdateCard :exec
 UPDATE cards
 SET deck_id = $2,
@@ -728,18 +1075,25 @@ const updateDeck = `-- name: UpdateDeck :exec
 UPDATE decks
 SET name = $2,
     type = $3,
+    is_public = $4,
     updated_at = NOW()
 WHERE id = $1
 `
 
 type UpdateDeckParams struct {
-	ID   int64
-	Name string
-	Type DeckType
+	ID       int64
+	Name     string
+	Type     DeckType
+	IsPublic bool
 }
 
 func (q *Queries) UpdateDeck(ctx context.Context, arg UpdateDeckParams) error {
-	_, err := q.db.Exec(ctx, updateDeck, arg.ID, arg.Name, arg.Type)
+	_, err := q.db.Exec(ctx, updateDeck,
+		arg.ID,
+		arg.Name,
+		arg.Type,
+		arg.IsPublic,
+	)
 	return err
 }
 
@@ -812,6 +1166,23 @@ WHERE id = $1
 
 func (q *Queries) UpdateUserEmailVerified(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, updateUserEmailVerified, id)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+type UpdateUserPasswordParams struct {
+	ID           int64
+	PasswordHash string
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
 	return err
 }
 

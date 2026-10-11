@@ -37,6 +37,37 @@ UPDATE users
 SET deleted_at = NOW()
 WHERE id = $1;
 
+-- name: HardDeleteUser :exec
+DELETE FROM users
+WHERE id = $1;
+
+-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2,
+    updated_at = NOW()
+WHERE id = $1;
+
+-- name: GetPasswordResetToken :one
+SELECT * FROM password_resets
+WHERE token = $1 AND expires_at > NOW()
+LIMIT 1;
+
+-- name: CreatePasswordResetToken :one
+INSERT INTO password_resets (
+  user_id, token, expires_at
+) VALUES (
+  $1, $2, $3
+)
+RETURNING *;
+
+-- name: DeletePasswordResetToken :exec
+DELETE FROM password_resets
+WHERE token = $1;
+
+-- name: DeletePasswordResetTokensByUserID :exec
+DELETE FROM password_resets
+WHERE user_id = $1;
+
 -- name: GetVerificationToken :one
 SELECT * FROM mail_verifications
 WHERE token = $1
@@ -170,19 +201,40 @@ WHERE id = $1;
 
 -- name: GetDeck :one
 SELECT * FROM decks
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 LIMIT 1;
 
 -- name: ListDecks :many
 SELECT * FROM decks
-WHERE deleted_at > NOW() OR deleted_at IS NULL
+WHERE deleted_at IS NULL
 ORDER BY name;
+
+-- name: ListPublicDecks :many
+SELECT * FROM decks
+WHERE is_public = TRUE AND deleted_at IS NULL
+ORDER BY name;
+
+-- name: ListDecksForUser :many
+SELECT DISTINCT d.id, d.name, d.type, d.owner_id, d.is_public, d.share_token, d.created_at, d.updated_at, d.deleted_at,
+  CASE
+    WHEN d.owner_id = $1 THEN 'owner'
+    WHEN s.permission IS NOT NULL THEN s.permission
+    ELSE 'public'
+  END AS user_access_role
+FROM decks d
+LEFT JOIN deck_shares s ON d.id = s.deck_id AND s.user_id = $1
+WHERE d.deleted_at IS NULL AND (
+    d.is_public = TRUE
+    OR d.owner_id = $1
+    OR s.user_id = $1
+)
+ORDER BY d.name;
 
 -- name: CreateDeck :one
 INSERT INTO decks (
-  name, type
+  name, type, owner_id, is_public, share_token
 ) VALUES (
-  $1, $2
+  $1, $2, $3, $4, $5
 )
 RETURNING *;
 
@@ -190,6 +242,7 @@ RETURNING *;
 UPDATE decks
 SET name = $2,
     type = $3,
+    is_public = $4,
     updated_at = NOW()
 WHERE id = $1;
 
@@ -197,3 +250,41 @@ WHERE id = $1;
 UPDATE decks
 SET deleted_at = NOW()
 WHERE id = $1;
+
+-- name: SetDeckShareToken :exec
+UPDATE decks
+SET share_token = $2,
+    updated_at = NOW()
+WHERE id = $1;
+
+-- name: GetDeckByShareToken :one
+SELECT * FROM decks
+WHERE share_token = $1 AND deleted_at IS NULL
+LIMIT 1;
+
+-- name: CreateDeckShare :one
+INSERT INTO deck_shares (
+  deck_id, user_id, invited_email, permission
+) VALUES (
+  $1, $2, $3, $4
+)
+ON CONFLICT (deck_id, user_id)
+DO UPDATE SET
+  permission = $4,
+  updated_at = NOW()
+RETURNING *;
+
+-- name: GetDeckShare :one
+SELECT * FROM deck_shares
+WHERE deck_id = $1 AND user_id = $2
+LIMIT 1;
+
+-- name: DeleteDeckShare :exec
+DELETE FROM deck_shares
+WHERE deck_id = $1 AND user_id = $2;
+
+-- name: ListDeckShares :many
+SELECT * FROM deck_shares
+WHERE deck_id = $1
+ORDER BY created_at ASC;
+
