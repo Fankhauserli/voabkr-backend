@@ -3,6 +3,8 @@ package handlers_test
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
@@ -241,37 +243,57 @@ func signedIn(userID int64, handler gin.HandlerFunc) gin.HandlerFunc {
 	}
 }
 
-// get serves route at path through handler as callerID, and returns what the
-// caller saw. access.Anonymous sends no session at all.
-func get(t *testing.T, handler gin.HandlerFunc, callerID int64, route, path string) *httptest.ResponseRecorder {
+// serve sends method to path through handler as callerID — access.Anonymous
+// sends no session at all — and returns what the caller saw. A non-empty body is
+// sent as JSON.
+func serve(t *testing.T, handler gin.HandlerFunc, callerID int64, method, route, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
+
 	router := setupTestRouter()
 	if callerID == access.Anonymous {
-		router.GET(route, handler)
+		router.Handle(method, route, handler)
 	} else {
-		router.GET(route, signedIn(callerID, handler))
+		router.Handle(method, route, signedIn(callerID, handler))
+	}
+
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+	router.ServeHTTP(w, req)
 	return w
+}
+
+// get serves route at path through handler as callerID, and returns what the
+// caller saw.
+func get(t *testing.T, handler gin.HandlerFunc, callerID int64, route, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return serve(t, handler, callerID, http.MethodGet, route, path, "")
 }
 
 // post serves route at path through handler as callerID with a JSON body, and
 // returns what the caller saw.
 func post(t *testing.T, handler gin.HandlerFunc, callerID int64, route, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	router := setupTestRouter()
-	if callerID == access.Anonymous {
-		router.POST(route, handler)
-	} else {
-		router.POST(route, signedIn(callerID, handler))
-	}
+	return serve(t, handler, callerID, http.MethodPost, route, path, body)
+}
 
-	req := httptest.NewRequest("POST", path, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+// put serves route at path through handler as callerID with a JSON body, and
+// returns what the caller saw.
+func put(t *testing.T, handler gin.HandlerFunc, callerID int64, route, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return serve(t, handler, callerID, http.MethodPut, route, path, body)
+}
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	return w
+// del serves route at path through handler as callerID, and returns what the
+// caller saw.
+func del(t *testing.T, handler gin.HandlerFunc, callerID int64, route, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return serve(t, handler, callerID, http.MethodDelete, route, path, "")
 }

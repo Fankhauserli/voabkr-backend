@@ -102,6 +102,29 @@ func TestRole(t *testing.T) {
 	}
 }
 
+func TestCanWriteCards(t *testing.T) {
+	tests := []struct {
+		name string
+		deck db.Deck
+		role string
+		want bool
+	}{
+		{name: "the owner writes their own deck's cards", deck: deck(7, true), role: access.RoleOwner, want: true},
+		{name: "a holder of an edit permission writes them", deck: deck(7, false), role: access.RoleEdit, want: true},
+		{name: "a holder of a view permission only reads", deck: deck(7, true), role: access.RoleView, want: false},
+		{name: "an anonymous caller writes nothing", deck: deck(7, true), role: access.RolePublic, want: false},
+		{name: "a system deck is never written, even by a share holder", deck: deck(0, true), role: access.RoleEdit, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := access.CanWriteCards(tt.deck, tt.role); got != tt.want {
+				t.Errorf("CanWriteCards() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCanRead(t *testing.T) {
 	tests := []struct {
 		name string

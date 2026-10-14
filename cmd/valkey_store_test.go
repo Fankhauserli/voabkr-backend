@@ -233,12 +233,13 @@ func TestValkeyStoreSessionLifecycle(t *testing.T) {
 	}
 }
 
-func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	h := &handlers.Handler{}
+// newTestSessionStore returns a session store over a mock Valkey server, for
+// tests that need a router whose session middleware answers.
+func newTestSessionStore(t *testing.T) *ValkeyStore {
+	t.Helper()
 
 	server := newMockRespServer(t)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client, err := valkey.NewClient(valkey.ClientOption{
 		InitAddress:  []string{server.Addr()},
@@ -248,9 +249,16 @@ func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(client.Close)
 
-	store := NewValkeyStore(client, []byte("test-secret-key-32b"))
+	return NewValkeyStore(client, []byte("test-secret-key-32b"))
+}
+
+func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &handlers.Handler{}
+
+	store := newTestSessionStore(t)
 
 	defer func() {
 		if r := recover(); r != nil {

@@ -138,6 +138,13 @@ func (h *Handler) CreateCards(c *gin.Context) {
 		return
 	}
 
+	// The Card is created in the Deck the request names, so it is that Deck's
+	// standing that decides whether the write happens at all.
+	caller, _ := callerID(c)
+	if !h.requireDeckWrite(c, int64(req.DeckId), caller) {
+		return
+	}
+
 	_, err := h.DB.CreateCard(c.Request.Context(), db.CreateCardParams{
 		DeckID:          int64(req.DeckId),
 		KoreanWord:      req.KoreanWord,
@@ -206,24 +213,23 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 		respondWithError(c, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
-	id, isValid := c.Params.Get("id")
 
-	if !isValid {
-		log.Printf("[WARN] Card: Failed to get card id")
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id", nil)
+	card, ok := h.requireWritableCard(c)
+	if !ok {
 		return
 	}
 
-	intId, err := strconv.ParseInt(id, 10, 64)
-
-	if err != nil {
-		log.Printf("[WARN] Card: Failed to get card id as int: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id as int", err)
-		return
+	// A request naming another Deck asks for a move, which needs the write on the
+	// Deck the Card would land in as well.
+	if claimed := int64(req.DeckId); claimed != card.DeckID {
+		caller, _ := callerID(c)
+		if !h.requireDeckWrite(c, claimed, caller) {
+			return
+		}
 	}
 
-	err = h.DB.UpdateCard(c.Request.Context(), db.UpdateCardParams{
-		ID:              intId,
+	err := h.DB.UpdateCard(c.Request.Context(), db.UpdateCardParams{
+		ID:              card.ID,
 		DeckID:          int64(req.DeckId),
 		KoreanWord:      req.KoreanWord,
 		EnglishWord:     req.EnglishWord,
@@ -245,23 +251,12 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 }
 
 func (h *Handler) DeleteCard(c *gin.Context) {
-	id, isValid := c.Params.Get("id")
-
-	if !isValid {
-		log.Printf("[WARN] Card: Failed to get card id")
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id", nil)
+	card, ok := h.requireWritableCard(c)
+	if !ok {
 		return
 	}
 
-	intId, err := strconv.ParseInt(id, 10, 64)
-
-	if err != nil {
-		log.Printf("[WARN] Card: Failed to get card id as int: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id as int", err)
-		return
-	}
-
-	err = h.DB.DeleteCard(c.Request.Context(), intId)
+	err := h.DB.DeleteCard(c.Request.Context(), card.ID)
 	if err != nil {
 		log.Printf("[WARN] Card: failed to delete Card: %v", err)
 		respondWithError(c, http.StatusInternalServerError, "Failed to delete Card", err)
@@ -273,6 +268,44 @@ func (h *Handler) DeleteCard(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Card deleted"})
+}
+
+// requireWritableCard loads the Card named by the request's :id and settles
+// whether the caller may write it. The Deck the Card is stored in is the one
+// that decides, never one the request claims, so the row is read first. It
+// answers the request itself: 404 when there is no such Card, 403 when there is
+// but the caller may not write the Deck holding it.
+//
+// Both an edit and a delete go through here, so the rule is applied in one place
+// rather than re-spelled per handler.
+func (h *Handler) requireWritableCard(c *gin.Context) (db.Card, bool) {
+	id, isValid := c.Params.Get("id")
+	if !isValid {
+		log.Printf("[WARN] Card: Failed to get card id")
+		respondWithError(c, http.StatusInternalServerError, "Failed to get card id", nil)
+		return db.Card{}, false
+	}
+
+	intId, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		log.Printf("[WARN] Card: Failed to get card id as int: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to get card id as int", err)
+		return db.Card{}, false
+	}
+
+	card, err := h.DB.GetCard(c.Request.Context(), intId)
+	if err != nil {
+		log.Printf("[WARN] Card: failed to get card: %v", err)
+		respondWithError(c, http.StatusNotFound, "Card not found", err)
+		return db.Card{}, false
+	}
+
+	caller, _ := callerID(c)
+	if !h.requireDeckWrite(c, card.DeckID, caller) {
+		return db.Card{}, false
+	}
+
+	return card, true
 }
 
 // cardResponseFor renders one Card with the caller's own Review schedule of it.
