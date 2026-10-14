@@ -3,12 +3,11 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/decks"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
-	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -29,50 +28,20 @@ func requireCaller(c *gin.Context) (int64, bool) {
 	return caller, true
 }
 
-// deckStanding is a Deck with the Access role the caller holds on it, whether or
-// not that standing permits what they asked for.
-type deckStanding struct {
-	deck db.Deck
-	role string
-}
-
-// How settling a Deck read can end without the caller being allowed in. Neither
-// answers the request: the words a refusal is put in belong to whoever asked.
-var (
-	errNoSuchDeck      = errors.New("no such Deck")
-	errDeckNotReadable = errors.New("Deck not readable by this caller")
-)
-
-// deckStandingOn reads deckID and resolves the caller's Access role on it from
-// the Deck and the caller's own DeckShare, judging nothing by it.
-func (h *Handler) deckStandingOn(ctx context.Context, deckID, caller int64) (deckStanding, error) {
-	deck, err := h.DB.GetDeck(ctx, deckID)
-	if err != nil {
-		return deckStanding{}, fmt.Errorf("%w: %v", errNoSuchDeck, err)
-	}
-
-	var share *db.DeckShare
-	if caller != access.Anonymous && !access.Owns(deck, caller) {
-		if s, err := h.DB.GetDeckShare(ctx, db.GetDeckShareParams{
-			DeckID: deck.ID,
-			UserID: pgtype.Int8{Int64: caller, Valid: true},
-		}); err == nil {
-			share = &s
-		}
-	}
-
-	return deckStanding{deck: deck, role: access.Role(deck, share, caller)}, nil
-}
+// How settling a Deck read can end without the caller being allowed in. It does
+// not answer the request: the words a refusal is put in belong to whoever asked.
+var errDeckNotReadable = errors.New("Deck not readable by this caller")
 
 // deckAccess settles whether caller may read deckID, without answering the
 // request. A batch needs this: it refuses one entry at a time, so the refusal
-// cannot be the request's.
-func (h *Handler) deckAccess(ctx context.Context, deckID, caller int64) (deckStanding, error) {
-	standing, err := h.deckStandingOn(ctx, deckID, caller)
+// cannot be the request's. The Deck itself is read, and the caller's Access role
+// resolved on it, by the Deck reader.
+func (h *Handler) deckAccess(ctx context.Context, deckID, caller int64) (decks.Standing, error) {
+	standing, err := h.Decks.StandingOn(ctx, deckID, caller)
 	if err != nil {
-		return deckStanding{}, err
+		return decks.Standing{}, err
 	}
-	if !access.CanRead(standing.deck, standing.role) {
+	if !access.CanRead(standing.Deck, standing.Role) {
 		return standing, errDeckNotReadable
 	}
 	return standing, nil
@@ -85,15 +54,15 @@ func (h *Handler) deckAccess(ctx context.Context, deckID, caller int64) (deckSta
 //
 // Every read of a Deck or its Cards goes through here, so the rule is applied in
 // one place rather than re-spelled per handler.
-func (h *Handler) requireReadableDeck(c *gin.Context, deckID int64, caller int64) (deckStanding, bool) {
+func (h *Handler) requireReadableDeck(c *gin.Context, deckID int64, caller int64) (decks.Standing, bool) {
 	standing, err := h.deckAccess(c.Request.Context(), deckID, caller)
 	switch {
-	case errors.Is(err, errNoSuchDeck):
+	case errors.Is(err, decks.ErrNoSuchDeck):
 		respondWithError(c, http.StatusNotFound, "Deck not found", err)
-		return deckStanding{}, false
+		return decks.Standing{}, false
 	case err != nil:
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access to this private deck is restricted"})
-		return deckStanding{}, false
+		return decks.Standing{}, false
 	}
 
 	return standing, true
@@ -107,15 +76,15 @@ func (h *Handler) requireReadableDeck(c *gin.Context, deckID int64, caller int64
 //
 // Every edit of a Deck or a Card goes through here, so the rule is applied in
 // one place rather than re-spelled per handler.
-func (h *Handler) requireDeckEdit(c *gin.Context, deckID int64, caller int64, refusal string) (deckStanding, bool) {
+func (h *Handler) requireDeckEdit(c *gin.Context, deckID int64, caller int64, refusal string) (decks.Standing, bool) {
 	// The only way resolving a standing fails is a Deck that isn't there.
-	standing, err := h.deckStandingOn(c.Request.Context(), deckID, caller)
+	standing, err := h.Decks.StandingOn(c.Request.Context(), deckID, caller)
 	if err != nil {
 		respondWithError(c, http.StatusNotFound, "Deck not found", err)
-		return deckStanding{}, false
+		return decks.Standing{}, false
 	}
 
-	if !access.CanEdit(standing.deck, standing.role) {
+	if !access.CanEdit(standing.Deck, standing.Role) {
 		c.JSON(http.StatusForbidden, gin.H{"error": refusal})
 		return standing, false
 	}
@@ -130,15 +99,15 @@ func (h *Handler) requireDeckEdit(c *gin.Context, deckID int64, caller int64, re
 //
 // Ownership is asked of access/, which fails closed: a System deck has no owner
 // for anyone to be, so it refuses every one of these acts.
-func (h *Handler) requireDeckOwner(c *gin.Context, deckID, caller int64, refusal string) (deckStanding, bool) {
+func (h *Handler) requireDeckOwner(c *gin.Context, deckID, caller int64, refusal string) (decks.Standing, bool) {
 	// The only way resolving a standing fails is a Deck that isn't there.
-	standing, err := h.deckStandingOn(c.Request.Context(), deckID, caller)
+	standing, err := h.Decks.StandingOn(c.Request.Context(), deckID, caller)
 	if err != nil {
 		respondWithError(c, http.StatusNotFound, "Deck not found", err)
-		return deckStanding{}, false
+		return decks.Standing{}, false
 	}
 
-	if !access.Owns(standing.deck, caller) {
+	if !access.Owns(standing.Deck, caller) {
 		c.JSON(http.StatusForbidden, gin.H{"error": refusal})
 		return standing, false
 	}
