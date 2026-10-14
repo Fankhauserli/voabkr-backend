@@ -126,11 +126,15 @@ func TestGetCardsWithoutDeckFilterListsOnlyReadableDecks(t *testing.T) {
 	}
 }
 
-// A warm cards:all entry — the shape the vulnerable handler wrote, another
-// learner's private Cards included — is not served to an anonymous caller.
+// An anonymous caller's listing is exactly the Cards of the public Decks the
+// instance holds, whatever sits under cards:all: a warm entry — the shape the
+// vulnerable handler wrote, another learner's private Cards included — neither
+// reaches the listing nor empties it.
 func TestGetCardsWithoutDeckFilterIgnoresWarmCacheEntry(t *testing.T) {
 	h := newTestHandlerWithCache(t)
 	owner := seedUser(t, "owner@example.com")
+	publicDeck := seedDeck(t, owner, true)
+	seedCard(t, publicDeck, "공개", "public")
 	privateDeck := seedDeck(t, owner, false)
 	seedCard(t, privateDeck, "비공개", "private")
 
@@ -143,8 +147,8 @@ func TestGetCardsWithoutDeckFilterIgnoresWarmCacheEntry(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200 for an anonymous caller, got %d: %s", w.Code, w.Body.String())
 	}
-	if got := cardWords(t, w.Body.Bytes()); len(got) != 0 {
-		t.Fatalf("expected no cards for an anonymous caller, got %v", got)
+	if got := cardWords(t, w.Body.Bytes()); !slices.Equal(got, []string{"공개"}) {
+		t.Fatalf("expected only the public Deck's Cards, got %v", got)
 	}
 }
 

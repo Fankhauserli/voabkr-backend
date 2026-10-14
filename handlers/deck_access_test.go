@@ -121,19 +121,20 @@ func TestGetDeckByIDMissingDeckNotFound(t *testing.T) {
 
 const decksRoute = "/api/v1/decks/"
 
-// A warm decks:all entry — a key named for every Deck on the instance, holding a
-// private Deck's Access role and share token — does not answer an anonymous
-// caller's listing, whoever left it there. Which Decks a caller may list is a
-// decision about the caller, so only decks:public, an entry holding public Decks
-// alone, serves it.
+// An anonymous caller's listing is exactly the public Decks the instance holds,
+// whatever sits under decks:all: a private Deck's Access role and share token in a
+// warm entry neither reaches the listing nor empties it. Which Decks a caller may
+// list is a decision about the caller, so only decks:public, an entry holding
+// public Decks alone, serves it.
 func TestGetDecksForAnonymousCallerIgnoresWarmDecksAllEntry(t *testing.T) {
 	h := newTestHandlerWithCache(t)
 	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	publicDeckID := seedDeck(t, owner, true)
+	privateDeckID := seedDeck(t, owner, false)
 
 	_ = h.Cache.SetProto(context.Background(), "decks:all", &types.DeckList{Decks: []*types.Deck{{
-		Id:             uint32(deckID),
-		Name:           "Seeded Deck",
+		Id:             uint32(privateDeckID),
+		Name:           "Warm Private Deck",
 		Type:           "vocabulary",
 		OwnerId:        uint32(owner),
 		IsPublic:       false,
@@ -151,7 +152,7 @@ func TestGetDecksForAnonymousCallerIgnoresWarmDecksAllEntry(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &decks); err != nil {
 		t.Fatalf("failed to parse response JSON: %v", err)
 	}
-	if len(decks) != 0 {
-		t.Fatalf("expected no decks for an anonymous caller, got %s", w.Body.String())
+	if len(decks) != 1 || decks[0].Id != uint32(publicDeckID) {
+		t.Fatalf("expected the public Deck and nothing else, got %s", w.Body.String())
 	}
 }
