@@ -4,29 +4,18 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
 func (h *Handler) GetSettings(c *gin.Context) {
-	session := sessions.Default(c)
-	userID := session.Get("user_id")
-	if userID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	cacheKey := fmt.Sprintf("settings:user:%d", intUserID)
 	if h.Cache != nil {
 		var cachedSettings types.SettingsResponse
@@ -65,19 +54,10 @@ func (h *Handler) GetSettings(c *gin.Context) {
 }
 
 func (h *Handler) UpdateSettings(c *gin.Context) {
-	session := sessions.Default(c)
-	userID := session.Get("user_id")
-	if userID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	var req types.UpdateSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("[WARN] Settings: invalid request body: %v", err)

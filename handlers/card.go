@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
@@ -28,7 +29,7 @@ func (h *Handler) GetCards(c *gin.Context) {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
 	}
 
-	caller, _ := callerID(c)
+	caller, _ := middleware.Caller(c)
 
 	// A Deck-filtered read is settled by the Deck first: the Cards are its, and
 	// serving them is a decision for the caller's own access to it.
@@ -140,7 +141,7 @@ func (h *Handler) CreateCards(c *gin.Context) {
 
 	// The Card is created in the Deck the request names, so it is that Deck's
 	// standing that decides whether the write happens at all.
-	caller, _ := callerID(c)
+	caller, _ := middleware.Caller(c)
 	if _, ok := h.requireDeckEdit(c, int64(req.DeckId), caller, cardEditRefusal); !ok {
 		return
 	}
@@ -192,7 +193,7 @@ func (h *Handler) GetCardByID(c *gin.Context) {
 		return
 	}
 
-	caller, _ := callerID(c)
+	caller, _ := middleware.Caller(c)
 	if _, ok := h.requireReadableDeck(c, card.DeckID, caller); !ok {
 		return
 	}
@@ -222,7 +223,7 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 	// A request naming another Deck asks for a move, which needs the edit on the
 	// Deck the Card would land in as well.
 	if claimed := int64(req.DeckId); claimed != card.DeckID {
-		caller, _ := callerID(c)
+		caller, _ := middleware.Caller(c)
 		if _, ok := h.requireDeckEdit(c, claimed, caller, cardEditRefusal); !ok {
 			return
 		}
@@ -300,7 +301,7 @@ func (h *Handler) requireWritableCard(c *gin.Context) (db.Card, bool) {
 		return db.Card{}, false
 	}
 
-	caller, _ := callerID(c)
+	caller, _ := middleware.Caller(c)
 	if _, ok := h.requireDeckEdit(c, card.DeckID, caller, cardEditRefusal); !ok {
 		return db.Card{}, false
 	}

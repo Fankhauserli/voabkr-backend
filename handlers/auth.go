@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/helpers"
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-contrib/sessions"
@@ -183,18 +183,21 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 }
 
 func (h *Handler) ResendVerificationEmail(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
+	// A signed-in learner's own address is the one to send to; a guest names it
+	// in the body, and a session this instance cannot place is sent to sign in
+	// again rather than treated as one of the two.
+	caller, signedIn := middleware.Caller(c)
+
+	if middleware.UnresolvedSession(c) {
+		middleware.RefuseUnauthorized(c)
+		return
+	}
 
 	var user db.User
 	var err error
 
-	if sessionUserID != nil {
-		var intUserID int64
-		intUserID, err = strconv.ParseInt(sessionUserID.(string), 10, 64)
-		if err == nil {
-			user, err = h.DB.GetUser(c.Request.Context(), intUserID)
-		}
+	if signedIn {
+		user, err = h.DB.GetUser(c.Request.Context(), caller)
 	}
 
 	if user.ID == 0 {
@@ -205,7 +208,7 @@ func (h *Handler) ResendVerificationEmail(c *gin.Context) {
 	}
 
 	if user.ID == 0 || err != nil {
-		if sessionUserID == nil {
+		if !signedIn {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Please log in or provide your registered email address"})
 		} else {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -302,4 +305,3 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password successfully reset. You may now log in."})
 }
-

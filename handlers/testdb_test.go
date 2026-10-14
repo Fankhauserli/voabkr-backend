@@ -15,6 +15,7 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/cache"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/sql/migrations"
 	"github.com/gin-contrib/sessions"
@@ -234,27 +235,32 @@ func seedShare(t *testing.T, deckID, userID int64, permission string) {
 }
 
 // signedIn installs the session a signed-in learner's request carries.
-func signedIn(userID int64, handler gin.HandlerFunc) gin.HandlerFunc {
+func signedIn(userID int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := sessions.Default(c)
 		session.Set("user_id", strconv.FormatInt(userID, 10))
 		_ = session.Save()
-		handler(c)
 	}
 }
 
 // serve sends method to path through handler as callerID — access.Anonymous
 // sends no session at all — and returns what the caller saw. A non-empty body is
 // sent as JSON.
+//
+// The chain is the router's: the session a signed-in learner's request carries
+// is established, the identity step resolves the caller from it, and only then
+// does the handler ask.
 func serve(t *testing.T, handler gin.HandlerFunc, callerID int64, method, route, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	router := setupTestRouter()
-	if callerID == access.Anonymous {
-		router.Handle(method, route, handler)
-	} else {
-		router.Handle(method, route, signedIn(callerID, handler))
+	chain := make([]gin.HandlerFunc, 0, 3)
+	if callerID != access.Anonymous {
+		chain = append(chain, signedIn(callerID))
 	}
+	chain = append(chain, middleware.ResolveCaller(), handler)
+
+	router := setupTestRouter()
+	router.Handle(method, route, chain...)
 
 	var reader io.Reader
 	if body != "" {

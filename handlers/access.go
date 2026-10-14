@@ -5,27 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// callerID returns the id of the learner making this request. ok is false for an
-// anonymous request: one carrying no session user id, or one that does not parse.
-func callerID(c *gin.Context) (id int64, ok bool) {
-	raw, ok := sessions.Default(c).Get("user_id").(string)
+// requireCaller returns the id of the learner making this request, answering 401
+// when it carries none and leaving ok false once it has. The private route group
+// gates on the same answer, in the same shape, so this is what a handler refuses
+// — and what covers one reached without the group's gate.
+//
+// The caller is resolved from the session once, by middleware.ResolveCaller;
+// handlers ask middleware.Caller for them and never parse the session.
+func requireCaller(c *gin.Context) (int64, bool) {
+	caller, ok := middleware.Caller(c)
 	if !ok {
+		middleware.RefuseUnauthorized(c)
 		return access.Anonymous, false
 	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return access.Anonymous, false
-	}
-	return id, true
+	return caller, true
 }
 
 // deckStanding is a Deck with the Access role the caller holds on it, whether or
