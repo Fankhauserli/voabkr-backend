@@ -17,6 +17,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/cache"
+	"github.com/Fankhauserli/voabkr-backend/cards"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -59,18 +60,9 @@ const sharedPrefix = "deck:shared:"
 // holds data, never decisions (ADR-0001).
 const publicListingKey = "decks:public"
 
-// cardsOfKey is the prefix a Deck's Card entries share, held under the Deck. The
-// Card reader builds those keys; what a Deck write has to clear is named here.
-func cardsOfKey(deckID int64) string { return fmt.Sprintf("cards:deck:%d", deckID) }
-
 // listingPrefix is what holds a listing a Deck appears in — the public one, where
 // its name is read by every sessionless caller.
 const listingPrefix = "decks:"
-
-// allCardsPrefix is what holds every Deck's Cards. Only erasing a learner takes
-// the Cards of Decks nobody wrote through, so it is the one write that clears
-// them wholesale.
-const allCardsPrefix = "cards:"
 
 // SharedDeck is a Deck as its share link serves it. FromEntry tells the shape
 // the link answered in: an entry holds the Deck alone, while reading the row
@@ -240,7 +232,7 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 	}
 
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
-	_ = r.cache.DeletePrefix(ctx, cardsOfKey(deckID))
+	_ = r.cache.DeletePrefix(ctx, cards.DeckPrefix(deckID))
 
 	deck, err := r.db.GetDeck(ctx, deckID)
 	if err != nil {
@@ -268,6 +260,6 @@ func (r *Reader) InvalidateEveryDeck(ctx context.Context) {
 		return
 	}
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
-	_ = r.cache.DeletePrefix(ctx, allCardsPrefix)
+	_ = r.cache.DeletePrefix(ctx, cards.Prefix())
 	_ = r.cache.DeletePrefix(ctx, sharedPrefix)
 }
