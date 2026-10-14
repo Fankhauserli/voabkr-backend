@@ -13,3 +13,53 @@ message ReviewRequest {
   // @gotags: json:"ease"
   int32 ease = 1 [json_name = "ease"];
 }
+
+// ReviewSchedule is the state a Review carries: what its next Due moment follows
+// from. The device computes it, the backend stores it as given and hands it back.
+message ReviewSchedule {
+  // @gotags: json:"interval"
+  int32 interval = 1 [json_name = "interval"];
+  // @gotags: json:"efactor"
+  double efactor = 2 [json_name = "efactor"];
+  // @gotags: json:"repetitions"
+  int32 repetitions = 3 [json_name = "repetitions"];
+  // When the Review is next Due, RFC 3339.
+  // @gotags: json:"nextReviewAt"
+  string next_review_at = 4 [json_name = "nextReviewAt"];
+}
+
+// GradeEntry is one Grade the device has already scheduled.
+message GradeEntry {
+  // @gotags: json:"cardId"
+  uint32 card_id = 1 [json_name = "cardId"];
+  // The Grade given: 1 Again, 2 Hard, 3 Good, 4 Easy.
+  // @gotags: json:"grade"
+  int32 grade = 2 [json_name = "grade"];
+  // The Review schedule the device computed for this Grade.
+  ReviewSchedule schedule = 3 [json_name = "schedule"];
+  // When the learner answered, RFC 3339. Between two answers, the later wins.
+  // @gotags: json:"answeredAt"
+  string answered_at = 4 [json_name = "answeredAt"];
+}
+
+message GradeBatchRequest {
+  // @gotags: json:"grades"
+  repeated GradeEntry grades = 1 [json_name = "grades"];
+}
+
+// GradeResult reports one entry's fate, so one refused Grade is one entry's
+// problem rather than a failed batch.
+message GradeResult {
+  // @gotags: json:"cardId"
+  uint32 card_id = 1 [json_name = "cardId"];
+  // @gotags: json:"accepted"
+  bool accepted = 2 [json_name = "accepted"];
+  // Why a Grade was refused, or that it was already recorded.
+  // @gotags: json:"reason"
+  string reason = 3 [json_name = "reason"];
+}
+
+message GradeBatchResponse {
+  // @gotags: json:"results"
+  repeated GradeResult results = 1 [json_name = "results"];
+}

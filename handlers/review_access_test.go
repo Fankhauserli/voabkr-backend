@@ -36,7 +36,8 @@ func TestGetReviewsForPrivateDeckReadableByOwner(t *testing.T) {
 	h := newTestHandler(t)
 	owner := seedUser(t, "owner@example.com")
 	deckID := seedDeck(t, owner, false)
-	seedCard(t, deckID, "비공개", "private")
+	cardID := seedCard(t, deckID, "비공개", "private")
+	seedDueReview(t, owner, cardID)
 
 	w := get(t, h.GetReviews, owner, reviewsRoute, reviewsPath(deckID))
 
@@ -48,27 +49,35 @@ func TestGetReviewsForPrivateDeckReadableByOwner(t *testing.T) {
 	}
 }
 
-// One learner's unfiltered queue introduces unstudied Cards from every Deck they
-// may read — and no others.
+// One learner's queue carries the Cards due in every Deck they may read — and no
+// others.
 func TestGetReviewsQueueSkipsUnreadableDecks(t *testing.T) {
 	h := newTestHandler(t)
 	learner := seedUser(t, "learner@example.com")
 	stranger := seedUser(t, "stranger@example.com")
 
 	publicDeck := seedDeck(t, stranger, true)
-	seedCard(t, publicDeck, "공개", "public")
+	publicCard := seedCard(t, publicDeck, "공개", "public")
 	learnerDeck := seedDeck(t, learner, false)
-	seedCard(t, learnerDeck, "내것", "mine")
+	learnerCard := seedCard(t, learnerDeck, "내것", "mine")
 	strangerDeck := seedDeck(t, stranger, false)
-	seedCard(t, strangerDeck, "남의", "someone else's")
+	strangerCard := seedCard(t, strangerDeck, "남의", "someone else's")
+
+	seedDueReview(t, learner, publicCard)
+	seedDueReview(t, learner, learnerCard)
+	seedDueReview(t, learner, strangerCard)
 
 	w := get(t, h.GetReviews, learner, reviewsRoute, "/api/v1/reviews/")
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if got := cardWords(t, w.Body.Bytes()); !slices.Equal(got, []string{"공개", "내것"}) {
-		t.Fatalf("expected only the learner's own and the public deck's cards, got %v", got)
+
+	// The queue's order is the device's to decide, so compare it as a set.
+	got := cardWords(t, w.Body.Bytes())
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"공개", "내것"}) {
+		t.Fatalf("expected only the learner's own and the public Deck's Cards, got %v", got)
 	}
 }
 

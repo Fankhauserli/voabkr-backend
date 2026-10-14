@@ -94,6 +94,7 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 			{
 				reviewGroup.GET("/", handler.GetReviews)
 				reviewGroup.POST("/", handler.CreateReview)
+				reviewGroup.POST("/batch", handler.SubmitGrades)
 				reviewGroup.GET("/since/:time", handler.GetReviewsSince)
 				reviewGroup.PUT("/:id", handler.UpdateReview)
 			}

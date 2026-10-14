@@ -172,35 +172,31 @@ WHERE c.id IN (
     )
   );
 
--- name: ListUnstudiedCardsByDeck :many
-SELECT c.* FROM cards c
-WHERE c.deck_id = $1
-  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND NOT EXISTS (
-    SELECT 1 FROM user_cards uc
-    WHERE uc.user_id = $2 AND uc.card_id = c.id
-  )
-ORDER BY c.id ASC
-LIMIT $3;
+-- name: ListUserCardSchedules :many
+-- The caller's own Review schedules for a set of Cards, so a Card response can
+-- carry what the device needs to compute forward.
+SELECT * FROM user_cards
+WHERE user_id = $1 AND card_id = ANY(sqlc.arg(card_ids)::bigint[]);
 
--- name: ListUnstudiedCards :many
-SELECT c.* FROM cards c
-JOIN decks d ON d.id = c.deck_id
-WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = sqlc.arg(user_id)
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = sqlc.arg(user_id)
-    )
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM user_cards uc
-    WHERE uc.user_id = sqlc.arg(user_id) AND uc.card_id = c.id
-  )
-ORDER BY c.id ASC
-LIMIT sqlc.arg(page_limit);
+-- name: ApplyGrade :execrows
+-- Stores the Review schedule the device computed, whole: repetitions and
+-- last_reviewed_at included. A Grade the device answered no later than the one
+-- already stored is a replay and changes nothing, so the later answer wins.
+INSERT INTO user_cards (
+  user_id, card_id, efactor, interval, repetitions, last_reviewed_at, next_review_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (user_id, card_id)
+DO UPDATE SET
+  efactor = EXCLUDED.efactor,
+  interval = EXCLUDED.interval,
+  repetitions = EXCLUDED.repetitions,
+  last_reviewed_at = EXCLUDED.last_reviewed_at,
+  next_review_at = EXCLUDED.next_review_at,
+  updated_at = NOW()
+WHERE user_cards.last_reviewed_at IS NULL
+   OR user_cards.last_reviewed_at < EXCLUDED.last_reviewed_at;
 
 
 -- name: UpdateUserCard :exec

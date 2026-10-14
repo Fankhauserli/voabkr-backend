@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package types;
 
+import "review.proto";
+
 option go_package = "github.com/Fankhauserli/voabkr-backend/types";
 
 message Card {
@@ -17,6 +19,9 @@ message Card {
   string context = 5 [json_name = "context"];
   // @gotags: json:"example"
   string example = 6 [json_name = "example"];
+  // The caller's Review schedule of this Card, absent until they have studied it.
+  // @gotags: json:"reviewSchedule"
+  ReviewSchedule review_schedule = 7 [json_name = "reviewSchedule"];
 }
 
 message CardRequest {
