@@ -48,6 +48,11 @@ func NewReader(q *db.Queries, c cache.Cache) *Reader {
 // write clears the link through the Deck the token belongs to.
 func sharedKey(token string) string { return fmt.Sprintf("deck:shared:%s", token) }
 
+// sharedPrefix is what holds every share-link entry. Links are cleared one at a
+// time wherever the Deck names its token; the prefix is for the writes that
+// cannot — an erasure, or a row that cannot be read.
+const sharedPrefix = "deck:shared:"
+
 // publicListingKey holds the public Decks alone, which every sessionless caller
 // reads alike. An entry that could hold a private Deck must not answer there:
 // which Decks a caller may list is a decision about the caller, and an entry
@@ -239,6 +244,10 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 
 	deck, err := r.db.GetDeck(ctx, deckID)
 	if err != nil {
+		// The token the link is keyed by cannot be read, and a link left answering
+		// from its entry is the thing this exists to prevent, so every link entry
+		// goes rather than the one.
+		_ = r.cache.DeletePrefix(ctx, sharedPrefix)
 		return
 	}
 	if deck.ShareToken.Valid && deck.ShareToken.String != "" {
@@ -246,13 +255,19 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 	}
 }
 
-// InvalidateEveryDeck drops what any Deck is held under, for the one caller that
-// takes Deck rows with it rather than writing through them: erasing a learner's
-// account erases the Decks it owned, and the Cards of those with it.
+// InvalidateEveryDeck drops what any Deck is held under. One caller needs this
+// rather than writing through the Deck: erasing a learner's account hands their
+// Decks to no one (the foreign key sets the owner to NULL), so the Decks stay
+// and become System decks — and their Cards, the listing they appear in, and
+// every link they answer under go with the erased standing.
+//
+// Every link entry goes, not only those of the erased learner's Decks: which
+// Decks were theirs is no longer readable from the row that would say.
 func (r *Reader) InvalidateEveryDeck(ctx context.Context) {
 	if r.cache == nil {
 		return
 	}
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
 	_ = r.cache.DeletePrefix(ctx, allCardsPrefix)
+	_ = r.cache.DeletePrefix(ctx, sharedPrefix)
 }
