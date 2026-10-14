@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,24 +191,30 @@ func seedCard(t *testing.T, deckID int64, korean, english string) int64 {
 // one that was studied and left to come round again.
 func seedDueReview(t *testing.T, learner, cardID int64) {
 	t.Helper()
+	seedScheduledReview(t, learner, cardID, time.Now().Add(-time.Hour))
+}
+
+// seedScheduledReview gives learner a Review of cardID due at nextReviewAt, as
+// one the device scheduled and answered an hour before it.
+func seedScheduledReview(t *testing.T, learner, cardID int64, nextReviewAt time.Time) {
+	t.Helper()
 	ctx := context.Background()
 
 	if _, err := testDB.CreateUserCard(ctx, db.CreateUserCardParams{UserID: learner, CardID: cardID}); err != nil {
 		t.Fatalf("failed to seed a review: %v", err)
 	}
 
-	now := time.Now()
 	err := testDB.UpdateUserCard(ctx, db.UpdateUserCardParams{
 		UserID:         learner,
 		CardID:         cardID,
 		Efactor:        2.5,
-		Interval:       1,
+		Interval:       6,
 		Repetitions:    1,
-		LastReviewedAt: pgtype.Timestamptz{Time: now.Add(-2 * time.Hour), Valid: true},
-		NextReviewAt:   pgtype.Timestamptz{Time: now.Add(-time.Hour), Valid: true},
+		LastReviewedAt: pgtype.Timestamptz{Time: nextReviewAt.Add(-time.Hour), Valid: true},
+		NextReviewAt:   pgtype.Timestamptz{Time: nextReviewAt, Valid: true},
 	})
 	if err != nil {
-		t.Fatalf("failed to seed a due review: %v", err)
+		t.Fatalf("failed to seed a scheduled review: %v", err)
 	}
 }
 
@@ -247,5 +254,24 @@ func get(t *testing.T, handler gin.HandlerFunc, callerID int64, route, path stri
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+	return w
+}
+
+// post serves route at path through handler as callerID with a JSON body, and
+// returns what the caller saw.
+func post(t *testing.T, handler gin.HandlerFunc, callerID int64, route, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	router := setupTestRouter()
+	if callerID == access.Anonymous {
+		router.POST(route, handler)
+	} else {
+		router.POST(route, signedIn(callerID, handler))
+	}
+
+	req := httptest.NewRequest("POST", path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 	return w
 }

@@ -34,9 +34,12 @@ type Card struct {
 	// @gotags: json:"context"
 	Context string `protobuf:"bytes,5,opt,name=context,proto3" json:"context"`
 	// @gotags: json:"example"
-	Example       string `protobuf:"bytes,6,opt,name=example,proto3" json:"example"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Example string `protobuf:"bytes,6,opt,name=example,proto3" json:"example"`
+	// The caller's Review schedule of this Card, absent until they have studied it.
+	// @gotags: json:"reviewSchedule"
+	ReviewSchedule *ReviewSchedule `protobuf:"bytes,7,opt,name=review_schedule,json=reviewSchedule,proto3" json:"reviewSchedule"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Card) Reset() {
@@ -109,6 +112,13 @@ func (x *Card) GetExample() string {
 		return x.Example
 	}
 	return ""
+}
+
+func (x *Card) GetReviewSchedule() *ReviewSchedule {
+	if x != nil {
+		return x.ReviewSchedule
+	}
+	return nil
 }
 
 type CardRequest struct {
@@ -242,7 +252,7 @@ var File_card_proto protoreflect.FileDescriptor
 const file_card_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"card.proto\x12\x05types\"\xa7\x01\n" +
+	"card.proto\x12\x05types\x1a\freview.proto\"\xe7\x01\n" +
 	"\x04Card\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x17\n" +
 	"\adeck_id\x18\x02 \x01(\rR\x06deckId\x12\x1f\n" +
@@ -250,7 +260,8 @@ const file_card_proto_rawDesc = "" +
 	"koreanWord\x12!\n" +
 	"\fenglish_word\x18\x04 \x01(\tR\venglishWord\x12\x18\n" +
 	"\acontext\x18\x05 \x01(\tR\acontext\x12\x18\n" +
-	"\aexample\x18\x06 \x01(\tR\aexample\"\x9e\x01\n" +
+	"\aexample\x18\x06 \x01(\tR\aexample\x12>\n" +
+	"\x0freview_schedule\x18\a \x01(\v2\x15.types.ReviewScheduleR\x0ereviewSchedule\"\x9e\x01\n" +
 	"\vCardRequest\x12\x17\n" +
 	"\adeck_id\x18\x01 \x01(\rR\x06deckId\x12\x1f\n" +
 	"\vkorean_word\x18\x02 \x01(\tR\n" +
@@ -275,17 +286,19 @@ func file_card_proto_rawDescGZIP() []byte {
 
 var file_card_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_card_proto_goTypes = []any{
-	(*Card)(nil),        // 0: types.Card
-	(*CardRequest)(nil), // 1: types.CardRequest
-	(*CardList)(nil),    // 2: types.CardList
+	(*Card)(nil),           // 0: types.Card
+	(*CardRequest)(nil),    // 1: types.CardRequest
+	(*CardList)(nil),       // 2: types.CardList
+	(*ReviewSchedule)(nil), // 3: types.ReviewSchedule
 }
 var file_card_proto_depIdxs = []int32{
-	0, // 0: types.CardList.cards:type_name -> types.Card
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3, // 0: types.Card.review_schedule:type_name -> types.ReviewSchedule
+	0, // 1: types.CardList.cards:type_name -> types.Card
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_card_proto_init() }
@@ -293,6 +306,7 @@ func file_card_proto_init() {
 	if File_card_proto != nil {
 		return
 	}
+	file_review_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

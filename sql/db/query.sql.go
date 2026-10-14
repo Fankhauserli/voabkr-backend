@@ -11,6 +11,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyGrade = `-- name: ApplyGrade :execrows
+INSERT INTO user_cards (
+  user_id, card_id, efactor, interval, repetitions, last_reviewed_at, next_review_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (user_id, card_id)
+DO UPDATE SET
+  efactor = EXCLUDED.efactor,
+  interval = EXCLUDED.interval,
+  repetitions = EXCLUDED.repetitions,
+  last_reviewed_at = EXCLUDED.last_reviewed_at,
+  next_review_at = EXCLUDED.next_review_at,
+  updated_at = NOW()
+WHERE user_cards.last_reviewed_at IS NULL
+   OR user_cards.last_reviewed_at < EXCLUDED.last_reviewed_at
+`
+
+type ApplyGradeParams struct {
+	UserID         int64
+	CardID         int64
+	Efactor        float64
+	Interval       int32
+	Repetitions    int32
+	LastReviewedAt pgtype.Timestamptz
+	NextReviewAt   pgtype.Timestamptz
+}
+
+// Stores the Review schedule the device computed, whole: repetitions and
+// last_reviewed_at included. A Grade the device answered no later than the one
+// already stored is a replay and changes nothing, so the later answer wins.
+func (q *Queries) ApplyGrade(ctx context.Context, arg ApplyGradeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, applyGrade,
+		arg.UserID,
+		arg.CardID,
+		arg.Efactor,
+		arg.Interval,
+		arg.Repetitions,
+		arg.LastReviewedAt,
+		arg.NextReviewAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createCard = `-- name: CreateCard :one
 INSERT INTO cards (
   deck_id, korean_word, english_word, context, example_sentence
@@ -1147,95 +1194,36 @@ func (q *Queries) ListPublicDecks(ctx context.Context) ([]Deck, error) {
 	return items, nil
 }
 
-const listUnstudiedCards = `-- name: ListUnstudiedCards :many
-SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
-JOIN decks d ON d.id = c.deck_id
-WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = $1
-    )
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM user_cards uc
-    WHERE uc.user_id = $1 AND uc.card_id = c.id
-  )
-ORDER BY c.id ASC
-LIMIT $2
+const listUserCardSchedules = `-- name: ListUserCardSchedules :many
+SELECT id, user_id, card_id, efactor, interval, repetitions, last_reviewed_at, next_review_at, created_at, updated_at, deleted_at FROM user_cards
+WHERE user_id = $1 AND card_id = ANY($2::bigint[])
 `
 
-type ListUnstudiedCardsParams struct {
-	UserID    pgtype.Int8
-	PageLimit int32
+type ListUserCardSchedulesParams struct {
+	UserID  int64
+	CardIds []int64
 }
 
-func (q *Queries) ListUnstudiedCards(ctx context.Context, arg ListUnstudiedCardsParams) ([]Card, error) {
-	rows, err := q.db.Query(ctx, listUnstudiedCards, arg.UserID, arg.PageLimit)
+// The caller's own Review schedules for a set of Cards, so a Card response can
+// carry what the device needs to compute forward.
+func (q *Queries) ListUserCardSchedules(ctx context.Context, arg ListUserCardSchedulesParams) ([]UserCard, error) {
+	rows, err := q.db.Query(ctx, listUserCardSchedules, arg.UserID, arg.CardIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Card
+	var items []UserCard
 	for rows.Next() {
-		var i Card
+		var i UserCard
 		if err := rows.Scan(
 			&i.ID,
-			&i.DeckID,
-			&i.KoreanWord,
-			&i.EnglishWord,
-			&i.Context,
-			&i.ExampleSentence,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUnstudiedCardsByDeck = `-- name: ListUnstudiedCardsByDeck :many
-SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
-WHERE c.deck_id = $1
-  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND NOT EXISTS (
-    SELECT 1 FROM user_cards uc
-    WHERE uc.user_id = $2 AND uc.card_id = c.id
-  )
-ORDER BY c.id ASC
-LIMIT $3
-`
-
-type ListUnstudiedCardsByDeckParams struct {
-	DeckID int64
-	UserID int64
-	Limit  int32
-}
-
-func (q *Queries) ListUnstudiedCardsByDeck(ctx context.Context, arg ListUnstudiedCardsByDeckParams) ([]Card, error) {
-	rows, err := q.db.Query(ctx, listUnstudiedCardsByDeck, arg.DeckID, arg.UserID, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Card
-	for rows.Next() {
-		var i Card
-		if err := rows.Scan(
-			&i.ID,
-			&i.DeckID,
-			&i.KoreanWord,
-			&i.EnglishWord,
-			&i.Context,
-			&i.ExampleSentence,
+			&i.UserID,
+			&i.CardID,
+			&i.Efactor,
+			&i.Interval,
+			&i.Repetitions,
+			&i.LastReviewedAt,
+			&i.NextReviewAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,

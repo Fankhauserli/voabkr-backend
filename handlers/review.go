@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -81,72 +83,165 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		return
 	}
 
-	returnCards := make([]types.Card, 0)
-	reviewedCardIDs := make(map[int64]bool)
-
-	for _, c := range cards {
-		if targetDeckID > 0 && c.DeckID != targetDeckID {
-			continue
-		}
-		reviewedCardIDs[c.ID] = true
-		returnCards = append(returnCards, types.Card{
-			Id:          uint32(c.ID),
-			DeckId:      uint32(c.DeckID),
-			KoreanWord:  c.KoreanWord,
-			EnglishWord: c.EnglishWord,
-			Context:     c.Context.String,
-			Example:     c.ExampleSentence.String,
-		})
-	}
-
-	// In Anki / spaced repetition: if user has fewer due cards than their daily limit,
-	// or hasn't studied any cards yet, introduce unstudied new cards.
-	limit := 20
-	if settings, sErr := h.DB.GetUserSettings(c.Request.Context(), intUserID); sErr == nil && settings.CardsPerDay > 0 {
-		limit = int(settings.CardsPerDay)
-	}
+	// The queue is the stored schedule's: the Cards whose Review is due at or
+	// before now, in whatever order they are read — the order a Session offers
+	// them in is the device's. Which new Cards a learner meets is its decision
+	// too, so none are introduced here.
 	if targetDeckID > 0 {
-		limit = 1000
+		cards = cardsOfDeck(cards, targetDeckID)
 	}
 
-	if len(returnCards) < limit {
-		needed := int32(limit - len(returnCards))
-		var unstudied []db.Card
-		var uErr error
-		if targetDeckID > 0 {
-			unstudied, uErr = h.DB.ListUnstudiedCardsByDeck(c.Request.Context(), db.ListUnstudiedCardsByDeckParams{
-				DeckID: targetDeckID,
-				UserID: intUserID,
-				Limit:  needed,
-			})
-		} else {
-			unstudied, uErr = h.DB.ListUnstudiedCards(c.Request.Context(), db.ListUnstudiedCardsParams{
-				UserID:    callerParam(intUserID),
-				PageLimit: needed,
-			})
-		}
-
-		if uErr == nil {
-			for _, c := range unstudied {
-				if reviewedCardIDs[c.ID] {
-					continue
-				}
-				reviewedCardIDs[c.ID] = true
-				returnCards = append(returnCards, types.Card{
-					Id:          uint32(c.ID),
-					DeckId:      uint32(c.DeckID),
-					KoreanWord:  c.KoreanWord,
-					EnglishWord: c.EnglishWord,
-					Context:     c.Context.String,
-					Example:     c.ExampleSentence.String,
-				})
-			}
-		}
+	returnCards, err := h.cardsWithSchedules(c.Request.Context(), intUserID, cards)
+	if err != nil {
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
+		return
 	}
 
 	c.JSON(http.StatusOK, returnCards)
 }
 
+// SubmitGrades accepts Grades the device has already scheduled, storing the
+// Review schedule it is given rather than computing one. Each entry is settled on
+// its own, so one refused Grade is not a failed batch.
+func (h *Handler) SubmitGrades(c *gin.Context) {
+	caller, ok := callerID(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req types.GradeBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[WARN] Grade: invalid request body: %v", err)
+		respondWithError(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	// A batch that parsed to nothing is a client that meant to send something: it
+	// would take a 200 as its Grades delivered and drop them. Unknown fields are
+	// discarded on the way in, so a mistyped key arrives as exactly this.
+	if len(req.Grades) == 0 {
+		respondWithError(c, http.StatusBadRequest, "No Grades in the batch", nil)
+		return
+	}
+
+	results := make([]*types.GradeResult, 0, len(req.Grades))
+	for _, entry := range req.Grades {
+		results = append(results, h.applyGrade(c.Request.Context(), caller, entry))
+	}
+
+	c.JSON(http.StatusOK, &types.GradeBatchResponse{Results: results})
+}
+
+// applyGrade stores one Grade the device scheduled, or says why it could not.
+// Every refusal is this entry's alone.
+func (h *Handler) applyGrade(ctx context.Context, caller int64, entry *types.GradeEntry) *types.GradeResult {
+	result := &types.GradeResult{CardId: entry.CardId}
+
+	grade, err := parseGrade(entry)
+	if err != nil {
+		result.Reason = err.Error()
+		return result
+	}
+
+	card, err := h.DB.GetCard(ctx, int64(entry.CardId))
+	if err != nil {
+		result.Reason = "unknown Card"
+		return result
+	}
+
+	// A Grade is only stored on a Deck the learner may read: a revoked DeckShare
+	// leaves the Grade refused, and the device keeps it for a later Sync.
+	if _, err := h.deckAccess(ctx, card.DeckID, caller); err != nil {
+		result.Reason = "no access to this Deck"
+		return result
+	}
+
+	stored, err := h.DB.ApplyGrade(ctx, db.ApplyGradeParams{
+		UserID:         caller,
+		CardID:         int64(entry.CardId),
+		Efactor:        grade.efactor,
+		Interval:       grade.interval,
+		Repetitions:    grade.repetitions,
+		LastReviewedAt: pgtype.Timestamptz{Time: grade.answeredAt, Valid: true},
+		NextReviewAt:   pgtype.Timestamptz{Time: grade.nextReviewAt, Valid: true},
+	})
+	if err != nil {
+		log.Printf("[WARN] Grade: failed to store a Grade for Card %d: %v", entry.CardId, err)
+		result.Reason = "could not store the Grade"
+		return result
+	}
+
+	// A Grade answered no later than the one already stored is a replay: it is
+	// accepted, so the device can drop it, and it changes nothing.
+	result.Accepted = true
+	if stored == 0 {
+		result.Reason = "already recorded; the later Grade stands"
+	}
+
+	return result
+}
+
+// scheduledGrade is a Grade entry read into the shapes the store needs: the
+// Review schedule the device computed, and the two moments it carries.
+type scheduledGrade struct {
+	interval     int32
+	efactor      float64
+	repetitions  int32
+	answeredAt   time.Time
+	nextReviewAt time.Time
+}
+
+// parseGrade reads a Grade entry, refusing anything the backend could not store
+// exactly as given.
+func parseGrade(entry *types.GradeEntry) (scheduledGrade, error) {
+	schedule := entry.Schedule
+	switch {
+	case schedule == nil:
+		return scheduledGrade{}, errors.New("no Review schedule")
+	case entry.Grade < 1 || entry.Grade > 4:
+		return scheduledGrade{}, errors.New("invalid Grade")
+	case schedule.Interval < 0:
+		return scheduledGrade{}, errors.New("invalid Interval")
+	case schedule.Efactor <= 0:
+		return scheduledGrade{}, errors.New("invalid Efactor")
+	case schedule.Repetitions < 0:
+		return scheduledGrade{}, errors.New("invalid repetitions")
+	}
+
+	answeredAt, err := time.Parse(time.RFC3339, entry.AnsweredAt)
+	if err != nil {
+		return scheduledGrade{}, errors.New("invalid answeredAt")
+	}
+
+	nextReviewAt, err := time.Parse(time.RFC3339, schedule.NextReviewAt)
+	if err != nil {
+		return scheduledGrade{}, errors.New("invalid nextReviewAt")
+	}
+
+	return scheduledGrade{
+		interval:     schedule.Interval,
+		efactor:      schedule.Efactor,
+		repetitions:  schedule.Repetitions,
+		answeredAt:   answeredAt,
+		nextReviewAt: nextReviewAt,
+	}, nil
+}
+
+// cardsOfDeck keeps the Cards belonging to one Deck.
+func cardsOfDeck(cards []db.Card, deckID int64) []db.Card {
+	kept := make([]db.Card, 0, len(cards))
+	for _, card := range cards {
+		if card.DeckID == deckID {
+			kept = append(kept, card)
+		}
+	}
+	return kept
+}
+
+// UpdateReview schedules a Grade here, the way this backend did before the
+// device took the scheduler over. It stays for the clients built against it; a
+// Grade sent to the batch route is stored as the device computed it.
 func (h *Handler) UpdateReview(c *gin.Context) {
 	session := sessions.Default(c)
 	userID := session.Get("user_id")
@@ -288,11 +383,13 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 	}
 
 	err = h.DB.UpdateUserCard(c.Request.Context(), db.UpdateUserCardParams{
-		UserID:       intUserID,
-		CardID:       intId,
-		Efactor:      newEfactor,
-		Interval:     newInterval,
-		NextReviewAt: pgtype.Timestamptz{Time: nextReviewAt, Valid: true},
+		UserID:         intUserID,
+		CardID:         intId,
+		Efactor:        newEfactor,
+		Interval:       newInterval,
+		Repetitions:    card.Repetitions + 1,
+		LastReviewedAt: pgtype.Timestamptz{Time: now, Valid: true},
+		NextReviewAt:   pgtype.Timestamptz{Time: nextReviewAt, Valid: true},
 	})
 	if err != nil {
 		log.Printf("[WARN] Review: failed to update UserCard: %v", err)
@@ -354,20 +451,14 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		return
 	}
 
-	returnCards := make([]types.Card, 0)
+	if targetDeckID > 0 {
+		cards = cardsOfDeck(cards, targetDeckID)
+	}
 
-	for _, c := range cards {
-		if targetDeckID > 0 && c.DeckID != targetDeckID {
-			continue
-		}
-		returnCards = append(returnCards, types.Card{
-			Id:          uint32(c.ID),
-			DeckId:      uint32(c.DeckID),
-			KoreanWord:  c.KoreanWord,
-			EnglishWord: c.EnglishWord,
-			Context:     c.Context.String,
-			Example:     c.ExampleSentence.String,
-		})
+	returnCards, err := h.cardsWithSchedules(c.Request.Context(), intUserID, cards)
+	if err != nil {
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
+		return
 	}
 
 	c.JSON(http.StatusOK, returnCards)

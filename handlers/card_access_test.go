@@ -66,7 +66,8 @@ func TestGetCardsOfPrivateDeckReadableByOwner(t *testing.T) {
 }
 
 // A warm cards:deck:<id> entry still answers for a caller with access to the
-// Deck — the cache is gated, not gone.
+// Deck — the cache is gated, not gone. The Card in it has no row in the database,
+// so its words can only have come from the entry.
 func TestGetCardsOfDeckServedFromWarmCache(t *testing.T) {
 	h := newTestHandlerWithCache(t)
 	owner := seedUser(t, "owner@example.com")
@@ -83,6 +84,45 @@ func TestGetCardsOfDeckServedFromWarmCache(t *testing.T) {
 	}
 	if got := cardWords(t, w.Body.Bytes()); !slices.Equal(got, []string{"캐시"}) {
 		t.Fatalf("expected the cached card, got %v", got)
+	}
+}
+
+// What a shared entry holds is the Deck's Cards; the caller's own Review schedule
+// is attached to them on the way out, so a warm entry does not answer a learner
+// as if they had never studied the Card.
+func TestGetCardsFromWarmCacheCarriesTheCallersSchedule(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	learner := seedUser(t, "learner@example.com")
+	deckID := seedDeck(t, learner, false)
+	cardID := seedCard(t, deckID, "배운", "studied")
+
+	nextReviewAt := time.Now().Add(24 * time.Hour).Truncate(time.Second)
+	seedScheduledReview(t, learner, cardID, nextReviewAt)
+
+	// The entry is the one the Deck's Cards are stored under, and the words in it
+	// differ from the row's, so the response shows where the Card came from.
+	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("cards:deck:%d", deckID), &types.CardList{
+		Cards: []*types.Card{{Id: uint32(cardID), DeckId: uint32(deckID), KoreanWord: "캐시", EnglishWord: "cache"}},
+	}, 5*time.Minute)
+
+	w := get(t, h.GetCards, learner, cardsRoute, cardsPath(deckID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cards []cardSchedule
+	if err := json.Unmarshal(w.Body.Bytes(), &cards); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+	if len(cards) != 1 || cards[0].KoreanWord != "캐시" {
+		t.Fatalf("expected the Card the entry holds, got %s", w.Body.String())
+	}
+	if cards[0].ReviewSchedule == nil {
+		t.Fatalf("expected the learner's Review schedule attached to the cached Card, got %s", w.Body.String())
+	}
+	if cards[0].ReviewSchedule.NextReviewAt != rfc3339(nextReviewAt) {
+		t.Fatalf("expected nextReviewAt %s, got %q", rfc3339(nextReviewAt), cards[0].ReviewSchedule.NextReviewAt)
 	}
 }
 

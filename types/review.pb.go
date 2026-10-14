@@ -111,6 +111,312 @@ func (x *ReviewRequest) GetEase() int32 {
 	return 0
 }
 
+// ReviewSchedule is the state a Review carries: what its next Due moment follows
+// from. The device computes it, the backend stores it as given and hands it back.
+type ReviewSchedule struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// @gotags: json:"interval"
+	Interval int32 `protobuf:"varint,1,opt,name=interval,proto3" json:"interval"`
+	// @gotags: json:"efactor"
+	Efactor float64 `protobuf:"fixed64,2,opt,name=efactor,proto3" json:"efactor"`
+	// @gotags: json:"repetitions"
+	Repetitions int32 `protobuf:"varint,3,opt,name=repetitions,proto3" json:"repetitions"`
+	// When the Review is next Due, RFC 3339.
+	// @gotags: json:"nextReviewAt"
+	NextReviewAt  string `protobuf:"bytes,4,opt,name=next_review_at,json=nextReviewAt,proto3" json:"nextReviewAt"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReviewSchedule) Reset() {
+	*x = ReviewSchedule{}
+	mi := &file_review_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewSchedule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewSchedule) ProtoMessage() {}
+
+func (x *ReviewSchedule) ProtoReflect() protoreflect.Message {
+	mi := &file_review_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewSchedule.ProtoReflect.Descriptor instead.
+func (*ReviewSchedule) Descriptor() ([]byte, []int) {
+	return file_review_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ReviewSchedule) GetInterval() int32 {
+	if x != nil {
+		return x.Interval
+	}
+	return 0
+}
+
+func (x *ReviewSchedule) GetEfactor() float64 {
+	if x != nil {
+		return x.Efactor
+	}
+	return 0
+}
+
+func (x *ReviewSchedule) GetRepetitions() int32 {
+	if x != nil {
+		return x.Repetitions
+	}
+	return 0
+}
+
+func (x *ReviewSchedule) GetNextReviewAt() string {
+	if x != nil {
+		return x.NextReviewAt
+	}
+	return ""
+}
+
+// GradeEntry is one Grade the device has already scheduled.
+type GradeEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// @gotags: json:"cardId"
+	CardId uint32 `protobuf:"varint,1,opt,name=card_id,json=cardId,proto3" json:"cardId"`
+	// The Grade given: 1 Again, 2 Hard, 3 Good, 4 Easy.
+	// @gotags: json:"grade"
+	Grade int32 `protobuf:"varint,2,opt,name=grade,proto3" json:"grade"`
+	// The Review schedule the device computed for this Grade.
+	Schedule *ReviewSchedule `protobuf:"bytes,3,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	// When the learner answered, RFC 3339. Between two answers, the later wins.
+	// @gotags: json:"answeredAt"
+	AnsweredAt    string `protobuf:"bytes,4,opt,name=answered_at,json=answeredAt,proto3" json:"answeredAt"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GradeEntry) Reset() {
+	*x = GradeEntry{}
+	mi := &file_review_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GradeEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GradeEntry) ProtoMessage() {}
+
+func (x *GradeEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_review_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GradeEntry.ProtoReflect.Descriptor instead.
+func (*GradeEntry) Descriptor() ([]byte, []int) {
+	return file_review_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GradeEntry) GetCardId() uint32 {
+	if x != nil {
+		return x.CardId
+	}
+	return 0
+}
+
+func (x *GradeEntry) GetGrade() int32 {
+	if x != nil {
+		return x.Grade
+	}
+	return 0
+}
+
+func (x *GradeEntry) GetSchedule() *ReviewSchedule {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
+func (x *GradeEntry) GetAnsweredAt() string {
+	if x != nil {
+		return x.AnsweredAt
+	}
+	return ""
+}
+
+type GradeBatchRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// @gotags: json:"grades"
+	Grades        []*GradeEntry `protobuf:"bytes,1,rep,name=grades,proto3" json:"grades"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GradeBatchRequest) Reset() {
+	*x = GradeBatchRequest{}
+	mi := &file_review_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GradeBatchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GradeBatchRequest) ProtoMessage() {}
+
+func (x *GradeBatchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_review_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GradeBatchRequest.ProtoReflect.Descriptor instead.
+func (*GradeBatchRequest) Descriptor() ([]byte, []int) {
+	return file_review_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GradeBatchRequest) GetGrades() []*GradeEntry {
+	if x != nil {
+		return x.Grades
+	}
+	return nil
+}
+
+// GradeResult reports one entry's fate, so one refused Grade is one entry's
+// problem rather than a failed batch.
+type GradeResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// @gotags: json:"cardId"
+	CardId uint32 `protobuf:"varint,1,opt,name=card_id,json=cardId,proto3" json:"cardId"`
+	// @gotags: json:"accepted"
+	Accepted bool `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted"`
+	// Why a Grade was refused, or that it was already recorded.
+	// @gotags: json:"reason"
+	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GradeResult) Reset() {
+	*x = GradeResult{}
+	mi := &file_review_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GradeResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GradeResult) ProtoMessage() {}
+
+func (x *GradeResult) ProtoReflect() protoreflect.Message {
+	mi := &file_review_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GradeResult.ProtoReflect.Descriptor instead.
+func (*GradeResult) Descriptor() ([]byte, []int) {
+	return file_review_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GradeResult) GetCardId() uint32 {
+	if x != nil {
+		return x.CardId
+	}
+	return 0
+}
+
+func (x *GradeResult) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *GradeResult) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type GradeBatchResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// @gotags: json:"results"
+	Results       []*GradeResult `protobuf:"bytes,1,rep,name=results,proto3" json:"results"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GradeBatchResponse) Reset() {
+	*x = GradeBatchResponse{}
+	mi := &file_review_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GradeBatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GradeBatchResponse) ProtoMessage() {}
+
+func (x *GradeBatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_review_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GradeBatchResponse.ProtoReflect.Descriptor instead.
+func (*GradeBatchResponse) Descriptor() ([]byte, []int) {
+	return file_review_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GradeBatchResponse) GetResults() []*GradeResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
 var File_review_proto protoreflect.FileDescriptor
 
 const file_review_proto_rawDesc = "" +
@@ -119,7 +425,27 @@ const file_review_proto_rawDesc = "" +
 	"\x06Review\x12\x17\n" +
 	"\acard_id\x18\x01 \x01(\rR\x06cardID\"#\n" +
 	"\rReviewRequest\x12\x12\n" +
-	"\x04ease\x18\x01 \x01(\x05R\x04easeB.Z,github.com/Fankhauserli/voabkr-backend/typesb\x06proto3"
+	"\x04ease\x18\x01 \x01(\x05R\x04ease\"\x8e\x01\n" +
+	"\x0eReviewSchedule\x12\x1a\n" +
+	"\binterval\x18\x01 \x01(\x05R\binterval\x12\x18\n" +
+	"\aefactor\x18\x02 \x01(\x01R\aefactor\x12 \n" +
+	"\vrepetitions\x18\x03 \x01(\x05R\vrepetitions\x12$\n" +
+	"\x0enext_review_at\x18\x04 \x01(\tR\fnextReviewAt\"\x8f\x01\n" +
+	"\n" +
+	"GradeEntry\x12\x17\n" +
+	"\acard_id\x18\x01 \x01(\rR\x06cardId\x12\x14\n" +
+	"\x05grade\x18\x02 \x01(\x05R\x05grade\x121\n" +
+	"\bschedule\x18\x03 \x01(\v2\x15.types.ReviewScheduleR\bschedule\x12\x1f\n" +
+	"\vanswered_at\x18\x04 \x01(\tR\n" +
+	"answeredAt\">\n" +
+	"\x11GradeBatchRequest\x12)\n" +
+	"\x06grades\x18\x01 \x03(\v2\x11.types.GradeEntryR\x06grades\"Z\n" +
+	"\vGradeResult\x12\x17\n" +
+	"\acard_id\x18\x01 \x01(\rR\x06cardId\x12\x1a\n" +
+	"\baccepted\x18\x02 \x01(\bR\baccepted\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"B\n" +
+	"\x12GradeBatchResponse\x12,\n" +
+	"\aresults\x18\x01 \x03(\v2\x12.types.GradeResultR\aresultsB.Z,github.com/Fankhauserli/voabkr-backend/typesb\x06proto3"
 
 var (
 	file_review_proto_rawDescOnce sync.Once
@@ -133,17 +459,25 @@ func file_review_proto_rawDescGZIP() []byte {
 	return file_review_proto_rawDescData
 }
 
-var file_review_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_review_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_review_proto_goTypes = []any{
-	(*Review)(nil),        // 0: types.Review
-	(*ReviewRequest)(nil), // 1: types.ReviewRequest
+	(*Review)(nil),             // 0: types.Review
+	(*ReviewRequest)(nil),      // 1: types.ReviewRequest
+	(*ReviewSchedule)(nil),     // 2: types.ReviewSchedule
+	(*GradeEntry)(nil),         // 3: types.GradeEntry
+	(*GradeBatchRequest)(nil),  // 4: types.GradeBatchRequest
+	(*GradeResult)(nil),        // 5: types.GradeResult
+	(*GradeBatchResponse)(nil), // 6: types.GradeBatchResponse
 }
 var file_review_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	2, // 0: types.GradeEntry.schedule:type_name -> types.ReviewSchedule
+	3, // 1: types.GradeBatchRequest.grades:type_name -> types.GradeEntry
+	5, // 2: types.GradeBatchResponse.results:type_name -> types.GradeResult
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_review_proto_init() }
@@ -157,7 +491,7 @@ func file_review_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_review_proto_rawDesc), len(file_review_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
