@@ -147,9 +147,7 @@ func (h *Handler) CreateDeck(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	_ = h.Decks.Invalidate(c.Request.Context(), newDeck.ID)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Deck created",
@@ -244,9 +242,7 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	_ = h.Decks.Invalidate(c.Request.Context(), intId)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deck updated"})
 }
@@ -272,15 +268,14 @@ func (h *Handler) DeleteDeck(c *gin.Context) {
 		return
 	}
 
+	// Cleared while the row is still there: the share-link entry is keyed by the
+	// token the row carries.
+	_ = h.Decks.Invalidate(c.Request.Context(), intId)
+
 	err = h.DB.DeleteDeck(c.Request.Context(), intId)
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to delete deck", err)
 		return
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deck deleted"})
@@ -346,9 +341,7 @@ func (h *Handler) ShareDeck(c *gin.Context) {
 		}
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	_ = h.Decks.Invalidate(c.Request.Context(), intId)
 
 	c.JSON(http.StatusOK, gin.H{
 		"shareToken": shareToken,
@@ -363,57 +356,27 @@ func (h *Handler) GetSharedDeckByToken(c *gin.Context) {
 		return
 	}
 
-	cacheKey := fmt.Sprintf("deck:shared:%s", token)
-	if h.Cache != nil {
-		var cachedDeck types.Deck
-		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedDeck); err == nil && found {
-			c.JSON(http.StatusOK, &cachedDeck)
-			return
-		}
-	}
-
-	if h.DB == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Shared deck not found or link has expired"})
-		return
-	}
-
-	deck, err := h.DB.GetDeckByShareToken(c.Request.Context(), pgtype.Text{String: token, Valid: true})
+	shared, err := h.Decks.Shared(c.Request.Context(), token)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Shared deck not found or link has expired"})
 		return
 	}
 
-	var ownerName string
-	var ownerID uint32
-	if deck.OwnerID.Valid {
-		ownerID = uint32(deck.OwnerID.Int64)
-		ownerUser, err := h.DB.GetUser(c.Request.Context(), deck.OwnerID.Int64)
-		if err == nil {
-			ownerName = ownerUser.Name
-		}
-	}
-
-	resp := &types.Deck{
-		Id:         uint32(deck.ID),
-		Name:       deck.Name,
-		Type:       string(deck.Type),
-		IsPublic:   deck.IsPublic,
-		OwnerId:    ownerID,
-		ShareToken: deck.ShareToken.String,
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, resp, 5*time.Minute)
+	// An entry holds the Deck alone; a row read also names its owner. The two
+	// shapes are a difference the wire contract keeps for now.
+	if shared.FromEntry {
+		c.JSON(http.StatusOK, shared.Deck)
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":         deck.ID,
-		"name":       deck.Name,
-		"type":       deck.Type,
-		"isPublic":   deck.IsPublic,
-		"ownerId":    ownerID,
-		"shareToken": deck.ShareToken.String,
-		"ownerName":  ownerName,
+		"id":         shared.Deck.Id,
+		"name":       shared.Deck.Name,
+		"type":       shared.Deck.Type,
+		"isPublic":   shared.Deck.IsPublic,
+		"ownerId":    shared.Deck.OwnerId,
+		"shareToken": shared.Deck.ShareToken,
+		"ownerName":  shared.OwnerName,
 	})
 }
 
@@ -452,9 +415,7 @@ func (h *Handler) JoinSharedDeck(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	_ = h.Decks.Invalidate(c.Request.Context(), deck.ID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Deck added to your study library",
@@ -486,9 +447,7 @@ func (h *Handler) RevokeDeckShare(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	_ = h.Decks.Invalidate(c.Request.Context(), deckID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Access revoked successfully"})
 }

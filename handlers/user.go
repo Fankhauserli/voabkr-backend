@@ -89,9 +89,10 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 
 	if h.Cache != nil {
 		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("user:profile:%d", intUserID))
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
 	}
+
+	// The erased learner's Decks went with them, and so did the Cards of those.
+	h.Decks.InvalidateEveryDeck(c.Request.Context())
 
 	session := sessions.Default(c)
 	session.Clear()
