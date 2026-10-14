@@ -10,6 +10,7 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.Engine {
@@ -25,6 +26,7 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
 	}))
 	router.Use(middleware.CORSMiddleware())
+	router.Use(middleware.PrometheusMiddleware())
 	if sessionStore != nil {
 		router.Use(sessions.Sessions("userSession", sessionStore))
 	}
@@ -35,6 +37,7 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 	router.GET("/readyz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	api := router.Group("/api")
 	{
