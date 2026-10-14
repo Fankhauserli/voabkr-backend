@@ -48,24 +48,9 @@ func (h *Handler) CreateReview(c *gin.Context) {
 }
 
 func (h *Handler) GetReviews(c *gin.Context) {
-	session := sessions.Default(c)
-	userID := session.Get("user_id")
-	if userID == nil {
+	intUserID, ok := callerID(c)
+	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
-
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	cards, err := h.DB.GetCardsDueForReview(c.Request.Context(), intUserID)
-	if err != nil {
-		log.Printf("[WARN] Review: failed to get Cards: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
 		return
 	}
 
@@ -79,6 +64,21 @@ func (h *Handler) GetReviews(c *gin.Context) {
 	var targetDeckID int64
 	if deckIDStr != "" {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
+	}
+
+	// A study session over one Deck is settled by that Deck, before any Card is
+	// read.
+	if targetDeckID > 0 {
+		if _, ok := h.requireReadableDeck(c, targetDeckID, intUserID); !ok {
+			return
+		}
+	}
+
+	cards, err := h.DB.GetCardsDueForReview(c.Request.Context(), intUserID)
+	if err != nil {
+		log.Printf("[WARN] Review: failed to get Cards: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
+		return
 	}
 
 	returnCards := make([]types.Card, 0)
@@ -121,8 +121,8 @@ func (h *Handler) GetReviews(c *gin.Context) {
 			})
 		} else {
 			unstudied, uErr = h.DB.ListUnstudiedCards(c.Request.Context(), db.ListUnstudiedCardsParams{
-				UserID: intUserID,
-				Limit:  needed,
+				UserID:    callerParam(intUserID),
+				PageLimit: needed,
 			})
 		}
 
@@ -304,16 +304,8 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 }
 
 func (h *Handler) GetReviewsSince(c *gin.Context) {
-	session := sessions.Default(c)
-	userID := session.Get("user_id")
-	if userID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
-
-	if err != nil {
+	intUserID, ok := callerID(c)
+	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -334,16 +326,6 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		return
 	}
 
-	cards, err := h.DB.GetCardsDueForReviewAfter(c.Request.Context(), db.GetCardsDueForReviewAfterParams{
-		UserID:       intUserID,
-		NextReviewAt: pgtype.Timestamptz{Time: sinceTime, Valid: true},
-	})
-	if err != nil {
-		log.Printf("[WARN] Review: failed to get Cards: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
-		return
-	}
-
 	deckIDStr := c.Query("deck_id")
 	if deckIDStr == "" {
 		deckIDStr = c.Query("deckId")
@@ -354,6 +336,22 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 	var targetDeckID int64
 	if deckIDStr != "" {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
+	}
+
+	if targetDeckID > 0 {
+		if _, ok := h.requireReadableDeck(c, targetDeckID, intUserID); !ok {
+			return
+		}
+	}
+
+	cards, err := h.DB.GetCardsDueForReviewAfter(c.Request.Context(), db.GetCardsDueForReviewAfterParams{
+		UserID:       intUserID,
+		NextReviewAt: pgtype.Timestamptz{Time: sinceTime, Valid: true},
+	})
+	if err != nil {
+		log.Printf("[WARN] Review: failed to get Cards: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
+		return
 	}
 
 	returnCards := make([]types.Card, 0)

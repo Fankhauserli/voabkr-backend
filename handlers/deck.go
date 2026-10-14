@@ -181,68 +181,29 @@ func (h *Handler) GetDeckByID(c *gin.Context) {
 		return
 	}
 
-	cacheKey := fmt.Sprintf("deck:%d", intId)
-	if h.Cache != nil {
-		var cachedDeck types.Deck
-		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedDeck); err == nil && found {
-			c.JSON(http.StatusOK, &cachedDeck)
-			return
-		}
-	}
-
-	deck, err := h.DB.GetDeck(c.Request.Context(), intId)
-	if err != nil {
-		respondWithError(c, http.StatusNotFound, "Deck not found", err)
+	// The Deck row decides who may read it, so it is read every time: a cached
+	// body would carry the Access role of whichever caller warmed it.
+	caller, _ := callerID(c)
+	readable, ok := h.requireReadableDeck(c, intId, caller)
+	if !ok {
 		return
 	}
-
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
-
-	userAccessRole := "public"
-	if sessionUserID != nil {
-		intUserID, parseErr := strconv.ParseInt(sessionUserID.(string), 10, 64)
-		if parseErr == nil {
-			if deck.OwnerID.Valid && deck.OwnerID.Int64 == intUserID {
-				userAccessRole = "owner"
-			} else {
-				share, shareErr := h.DB.GetDeckShare(c.Request.Context(), db.GetDeckShareParams{
-					DeckID: deck.ID,
-					UserID: pgtype.Int8{Int64: intUserID, Valid: true},
-				})
-				if shareErr == nil && share.Permission != "" {
-					userAccessRole = share.Permission
-				}
-			}
-		}
-	}
-
-	// If deck is private, ensure current user has access
-	if !deck.IsPublic && userAccessRole == "public" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access to this private deck is restricted"})
-		return
-	}
+	deck := readable.deck
 
 	var ownerID uint32
 	if deck.OwnerID.Valid {
 		ownerID = uint32(deck.OwnerID.Int64)
 	}
 
-	resp := &types.Deck{
+	c.JSON(http.StatusOK, &types.Deck{
 		Id:             uint32(deck.ID),
 		Name:           deck.Name,
 		Type:           string(deck.Type),
 		OwnerId:        ownerID,
 		IsPublic:       deck.IsPublic,
 		ShareToken:     deck.ShareToken.String,
-		UserAccessRole: userAccessRole,
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, resp, 5*time.Minute)
-	}
-
-	c.JSON(http.StatusOK, resp)
+		UserAccessRole: readable.role,
+	})
 }
 
 func (h *Handler) UpdateDeck(c *gin.Context) {
@@ -315,7 +276,6 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 	}
 
 	if h.Cache != nil {
-		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("deck:%d", intId))
 		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
 	}
 
@@ -367,7 +327,6 @@ func (h *Handler) DeleteDeck(c *gin.Context) {
 	}
 
 	if h.Cache != nil {
-		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("deck:%d", intId))
 		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
 		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
 	}

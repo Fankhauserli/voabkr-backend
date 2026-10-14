@@ -141,16 +141,36 @@ SELECT COUNT(*) FROM user_cards
 WHERE user_id = $1 AND next_review_at <= NOW();
 
 -- name: GetCardsDueForReviewAfter :many
-SELECT * FROM cards
-WHERE id IN (
-    SELECT card_id FROM user_cards
-    WHERE user_id = $1 AND next_review_at <= NOW() AND next_review_at > $2
-);
+SELECT c.* FROM cards c
+JOIN decks d ON d.id = c.deck_id
+WHERE c.id IN (
+    SELECT uc.card_id FROM user_cards uc
+    WHERE uc.user_id = $1 AND uc.next_review_at <= NOW() AND uc.next_review_at > $2
+  )
+  AND (
+    d.is_public = TRUE
+    OR d.owner_id = $1
+    OR EXISTS (
+      SELECT 1 FROM deck_shares s
+      WHERE s.deck_id = d.id AND s.user_id = $1
+    )
+  );
+
 -- name: GetCardsDueForReview :many
-SELECT * FROM cards
-WHERE id IN
-(SELECT card_id FROM user_cards
-WHERE user_id = $1 AND next_review_at <= NOW());
+SELECT c.* FROM cards c
+JOIN decks d ON d.id = c.deck_id
+WHERE c.id IN (
+    SELECT uc.card_id FROM user_cards uc
+    WHERE uc.user_id = $1 AND uc.next_review_at <= NOW()
+  )
+  AND (
+    d.is_public = TRUE
+    OR d.owner_id = $1
+    OR EXISTS (
+      SELECT 1 FROM deck_shares s
+      WHERE s.deck_id = d.id AND s.user_id = $1
+    )
+  );
 
 -- name: ListUnstudiedCardsByDeck :many
 SELECT c.* FROM cards c
@@ -165,13 +185,22 @@ LIMIT $3;
 
 -- name: ListUnstudiedCards :many
 SELECT c.* FROM cards c
+JOIN decks d ON d.id = c.deck_id
 WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND (
+    d.is_public = TRUE
+    OR d.owner_id = sqlc.arg(user_id)
+    OR EXISTS (
+      SELECT 1 FROM deck_shares s
+      WHERE s.deck_id = d.id AND s.user_id = sqlc.arg(user_id)
+    )
+  )
   AND NOT EXISTS (
     SELECT 1 FROM user_cards uc
-    WHERE uc.user_id = $1 AND uc.card_id = c.id
+    WHERE uc.user_id = sqlc.arg(user_id) AND uc.card_id = c.id
   )
 ORDER BY c.id ASC
-LIMIT $2;
+LIMIT sqlc.arg(page_limit);
 
 
 -- name: UpdateUserCard :exec
@@ -193,10 +222,34 @@ SELECT * FROM cards
 WHERE id = $1
 LIMIT 1;
 
--- name: ListCards :many
-SELECT * FROM cards
-WHERE deleted_at > NOW() OR deleted_at IS NULL
-ORDER BY id ASC;
+-- name: ListAccessibleCards :many
+SELECT c.* FROM cards c
+JOIN decks d ON d.id = c.deck_id
+WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND (
+    d.is_public = TRUE
+    OR d.owner_id = sqlc.arg(user_id)
+    OR EXISTS (
+      SELECT 1 FROM deck_shares s
+      WHERE s.deck_id = d.id AND s.user_id = sqlc.arg(user_id)
+    )
+  )
+ORDER BY c.id ASC;
+
+-- name: ListAccessibleCardsPaged :many
+SELECT c.* FROM cards c
+JOIN decks d ON d.id = c.deck_id
+WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND (
+    d.is_public = TRUE
+    OR d.owner_id = sqlc.arg(user_id)
+    OR EXISTS (
+      SELECT 1 FROM deck_shares s
+      WHERE s.deck_id = d.id AND s.user_id = sqlc.arg(user_id)
+    )
+  )
+ORDER BY c.id ASC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: ListCardsByDeck :many
 SELECT * FROM cards
@@ -208,12 +261,6 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM cards
 WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
 ORDER BY id ASC;
-
--- name: ListCardsPaged :many
-SELECT * FROM cards
-WHERE (deleted_at > NOW() OR deleted_at IS NULL)
-ORDER BY id ASC
-LIMIT $1 OFFSET $2;
 
 -- name: CreateCard :one
 INSERT INTO cards (
