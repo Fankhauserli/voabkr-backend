@@ -52,12 +52,13 @@ func CanRead(deck db.Deck, role string) bool {
 	return deck.IsPublic || role != RolePublic
 }
 
-// CanWriteCards reports whether a caller holding role may add, change or delete
-// deck's Cards: the Deck owner may, and so may a holder of an edit Permission.
-// Reading is not writing, so a holder of a view Permission may not.
+// CanEdit reports whether a caller holding role may change deck or what it holds
+// — its name and type, and its Cards. The Deck owner may, and so may a holder of
+// an edit Permission; reading is not editing, so a holder of a view Permission
+// may not.
 //
 // A Deck with no owner is a System deck, maintained by the project: no standing
-// on it confers a write, however that standing was come by.
-func CanWriteCards(deck db.Deck, role string) bool {
+// on it confers an edit, however that standing was come by.
+func CanEdit(deck db.Deck, role string) bool {
 	return deck.OwnerID.Valid && (role == RoleOwner || role == RoleEdit)
 }

@@ -141,7 +141,7 @@ func (h *Handler) CreateCards(c *gin.Context) {
 	// The Card is created in the Deck the request names, so it is that Deck's
 	// standing that decides whether the write happens at all.
 	caller, _ := callerID(c)
-	if !h.requireDeckWrite(c, int64(req.DeckId), caller) {
+	if _, ok := h.requireDeckEdit(c, int64(req.DeckId), caller, cardEditRefusal); !ok {
 		return
 	}
 
@@ -219,11 +219,11 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 		return
 	}
 
-	// A request naming another Deck asks for a move, which needs the write on the
+	// A request naming another Deck asks for a move, which needs the edit on the
 	// Deck the Card would land in as well.
 	if claimed := int64(req.DeckId); claimed != card.DeckID {
 		caller, _ := callerID(c)
-		if !h.requireDeckWrite(c, claimed, caller) {
+		if _, ok := h.requireDeckEdit(c, claimed, caller, cardEditRefusal); !ok {
 			return
 		}
 	}
@@ -301,12 +301,16 @@ func (h *Handler) requireWritableCard(c *gin.Context) (db.Card, bool) {
 	}
 
 	caller, _ := callerID(c)
-	if !h.requireDeckWrite(c, card.DeckID, caller) {
+	if _, ok := h.requireDeckEdit(c, card.DeckID, caller, cardEditRefusal); !ok {
 		return db.Card{}, false
 	}
 
 	return card, true
 }
+
+// cardEditRefusal is how a caller is told their standing on a Deck does not
+// reach its Cards — the words a Card write is refused in.
+const cardEditRefusal = "You do not have permission to edit this deck's Cards"
 
 // cardResponseFor renders one Card with the caller's own Review schedule of it.
 func (h *Handler) cardResponseFor(ctx context.Context, caller int64, card db.Card) (*types.Card, error) {

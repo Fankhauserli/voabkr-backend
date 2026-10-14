@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-contrib/sessions"
@@ -232,23 +233,9 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 		return
 	}
 
-	deck, err := h.DB.GetDeck(c.Request.Context(), intId)
-	if err != nil {
-		respondWithError(c, http.StatusNotFound, "Deck not found", err)
+	standing, ok := h.requireDeckEdit(c, intId, intUserID, "You do not have permission to edit this deck")
+	if !ok {
 		return
-	}
-
-	// Ownership / collaborator edit check
-	isOwner := deck.OwnerID.Valid && deck.OwnerID.Int64 == intUserID
-	if !isOwner {
-		share, shareErr := h.DB.GetDeckShare(c.Request.Context(), db.GetDeckShareParams{
-			DeckID: intId,
-			UserID: pgtype.Int8{Int64: intUserID, Valid: true},
-		})
-		if shareErr != nil || share.Permission != "edit" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to edit this deck"})
-			return
-		}
 	}
 
 	var req types.DeckRequest
@@ -258,8 +245,8 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 	}
 
 	// Only owner can change public/private visibility
-	isPublicToSet := deck.IsPublic
-	if isOwner {
+	isPublicToSet := standing.deck.IsPublic
+	if access.Owns(standing.deck, intUserID) {
 		isPublicToSet = req.IsPublic
 	}
 
@@ -308,15 +295,7 @@ func (h *Handler) DeleteDeck(c *gin.Context) {
 		return
 	}
 
-	deck, err := h.DB.GetDeck(c.Request.Context(), intId)
-	if err != nil {
-		respondWithError(c, http.StatusNotFound, "Deck not found", err)
-		return
-	}
-
-	// Owner only check
-	if deck.OwnerID.Valid && deck.OwnerID.Int64 != intUserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Only the deck owner can delete this deck"})
+	if _, ok := h.requireDeckOwner(c, intId, intUserID, "Only the deck owner can delete this deck"); !ok {
 		return
 	}
 
@@ -360,17 +339,11 @@ func (h *Handler) ShareDeck(c *gin.Context) {
 		return
 	}
 
-	deck, err := h.DB.GetDeck(c.Request.Context(), intId)
-	if err != nil {
-		respondWithError(c, http.StatusNotFound, "Deck not found", err)
+	standing, ok := h.requireDeckOwner(c, intId, intUserID, "Only the deck owner can share this deck")
+	if !ok {
 		return
 	}
-
-	// Only owner can share deck
-	if deck.OwnerID.Valid && deck.OwnerID.Int64 != intUserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Only the deck owner can share this deck"})
-		return
-	}
+	deck := standing.deck
 
 	// Ensure share_token exists
 	shareToken := deck.ShareToken.String
@@ -555,15 +528,7 @@ func (h *Handler) RevokeDeckShare(c *gin.Context) {
 	deckID, _ := strconv.ParseInt(deckIDStr, 10, 64)
 	targetUserID, _ := strconv.ParseInt(targetUserIDStr, 10, 64)
 
-	deck, err := h.DB.GetDeck(c.Request.Context(), deckID)
-	if err != nil {
-		respondWithError(c, http.StatusNotFound, "Deck not found", err)
-		return
-	}
-
-	// Owner check
-	if deck.OwnerID.Valid && deck.OwnerID.Int64 != intUserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Only the deck owner can revoke shared access"})
+	if _, ok := h.requireDeckOwner(c, deckID, intUserID, "Only the deck owner can revoke shared access"); !ok {
 		return
 	}
 
