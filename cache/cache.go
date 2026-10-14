@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
@@ -259,6 +260,7 @@ func (c *TwoLevelCache) Delete(ctx context.Context, keys ...string) error {
 }
 
 // DeletePrefix invalidates all keys starting with the given prefix across local memory and Valkey cluster nodes.
+// When operating against a multi-node Valkey cluster, shards are scanned and invalidated concurrently.
 func (c *TwoLevelCache) DeletePrefix(ctx context.Context, prefix string) error {
 	if c.local != nil {
 		c.local.DeletePrefix(prefix)
@@ -269,9 +271,15 @@ func (c *TwoLevelCache) DeletePrefix(ctx context.Context, prefix string) error {
 		if len(nodes) == 0 {
 			c.scanAndDelete(ctx, c.valkey, prefix)
 		} else {
+			var wg sync.WaitGroup
 			for _, node := range nodes {
-				c.scanAndDelete(ctx, node, prefix)
+				wg.Add(1)
+				go func(client valkey.Client) {
+					defer wg.Done()
+					c.scanAndDelete(ctx, client, prefix)
+				}(node)
 			}
+			wg.Wait()
 		}
 	}
 
@@ -282,7 +290,13 @@ func (c *TwoLevelCache) scanAndDelete(ctx context.Context, client valkey.Client,
 	var cursor uint64
 	matchPattern := prefix + "*"
 	for {
-		cmd := client.B().Scan().Cursor(cursor).Match(matchPattern).Count(100).Build()
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		cmd := client.B().Scan().Cursor(cursor).Match(matchPattern).Count(250).Build()
 		res, err := client.Do(ctx, cmd).AsScanEntry()
 		if err != nil {
 			break
