@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -24,11 +24,17 @@ func generateShareToken() string {
 }
 
 func (h *Handler) GetDecks(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
+	caller, signedIn := middleware.Caller(c)
+
+	// A session naming a learner this instance cannot place is told to sign in
+	// again rather than served a guest's decks.
+	if middleware.UnresolvedSession(c) {
+		middleware.RefuseUnauthorized(c)
+		return
+	}
 
 	// 1. Unauthenticated (Guests) -> return only public decks
-	if sessionUserID == nil {
+	if !signedIn {
 		// decks:public holds public Decks alone, so it reads the same for every
 		// sessionless caller. An entry that could hold a private Deck must not
 		// answer here: which Decks a caller may list is a decision about the
@@ -74,13 +80,7 @@ func (h *Handler) GetDecks(c *gin.Context) {
 	}
 
 	// 2. Authenticated user -> return public decks + owned decks + shared decks
-	intUserID, err := strconv.ParseInt(sessionUserID.(string), 10, 64)
-	if err != nil {
-		respondWithError(c, http.StatusBadRequest, "Invalid session user ID", err)
-		return
-	}
-
-	cacheKey := fmt.Sprintf("decks:user:%d", intUserID)
+	cacheKey := fmt.Sprintf("decks:user:%d", caller)
 	if h.Cache != nil {
 		var cachedList types.DeckList
 		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedList); err == nil && found {
@@ -89,7 +89,7 @@ func (h *Handler) GetDecks(c *gin.Context) {
 		}
 	}
 
-	userDecks, err := h.DB.ListDecksForUser(c.Request.Context(), pgtype.Int8{Int64: intUserID, Valid: true})
+	userDecks, err := h.DB.ListDecksForUser(c.Request.Context(), pgtype.Int8{Int64: caller, Valid: true})
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to retrieve decks", err)
 		return
@@ -120,19 +120,10 @@ func (h *Handler) GetDecks(c *gin.Context) {
 }
 
 func (h *Handler) CreateDeck(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
-	if sessionUserID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(sessionUserID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	var req types.DeckRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("[WARN] Deck: invalid request body: %v", err)
@@ -184,7 +175,7 @@ func (h *Handler) GetDeckByID(c *gin.Context) {
 
 	// The Deck row decides who may read it, so it is read every time: a cached
 	// body would carry the Access role of whichever caller warmed it.
-	caller, _ := callerID(c)
+	caller, _ := middleware.Caller(c)
 	readable, ok := h.requireReadableDeck(c, intId, caller)
 	if !ok {
 		return
@@ -208,19 +199,10 @@ func (h *Handler) GetDeckByID(c *gin.Context) {
 }
 
 func (h *Handler) UpdateDeck(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
-	if sessionUserID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(sessionUserID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	id, isValid := c.Params.Get("id")
 	if !isValid {
 		respondWithError(c, http.StatusBadRequest, "Missing deck id parameter", nil)
@@ -270,19 +252,10 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 }
 
 func (h *Handler) DeleteDeck(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
-	if sessionUserID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(sessionUserID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	id, isValid := c.Params.Get("id")
 	if !isValid {
 		respondWithError(c, http.StatusBadRequest, "Missing deck id parameter", nil)
@@ -314,19 +287,10 @@ func (h *Handler) DeleteDeck(c *gin.Context) {
 }
 
 func (h *Handler) ShareDeck(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
-	if sessionUserID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(sessionUserID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	id, isValid := c.Params.Get("id")
 	if !isValid {
 		respondWithError(c, http.StatusBadRequest, "Missing deck id parameter", nil)
@@ -453,21 +417,11 @@ func (h *Handler) GetSharedDeckByToken(c *gin.Context) {
 	})
 }
 
-
 func (h *Handler) JoinSharedDeck(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
-	if sessionUserID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(sessionUserID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	token := c.Param("token")
 	if token == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing share token"})
@@ -509,19 +463,10 @@ func (h *Handler) JoinSharedDeck(c *gin.Context) {
 }
 
 func (h *Handler) RevokeDeckShare(c *gin.Context) {
-	session := sessions.Default(c)
-	sessionUserID := session.Get("user_id")
-	if sessionUserID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
-
-	intUserID, err := strconv.ParseInt(sessionUserID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	deckIDStr := c.Param("id")
 	targetUserIDStr := c.Param("user_id")
 
@@ -532,7 +477,7 @@ func (h *Handler) RevokeDeckShare(c *gin.Context) {
 		return
 	}
 
-	err = h.DB.DeleteDeckShare(c.Request.Context(), db.DeleteDeckShareParams{
+	err := h.DB.DeleteDeckShare(c.Request.Context(), db.DeleteDeckShareParams{
 		DeckID: deckID,
 		UserID: pgtype.Int8{Int64: targetUserID, Valid: true},
 	})

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/cache"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -85,12 +86,13 @@ func TestGetSettingsCacheHit(t *testing.T) {
 
 	h := handlers.NewHandler(nil, c)
 	r := setupTestRouter()
+	// The chain is the router's: the session is established, the identity step
+	// resolves the caller from it, and the handler asks.
 	r.GET("/api/v1/user/settings", func(ctx *gin.Context) {
 		session := sessions.Default(ctx)
 		session.Set("user_id", "7")
 		_ = session.Save()
-		h.GetSettings(ctx)
-	})
+	}, middleware.ResolveCaller(), h.GetSettings)
 
 	req := httptest.NewRequest("GET", "/api/v1/user/settings", nil)
 	w := httptest.NewRecorder()

@@ -25,7 +25,7 @@ Authentication uses cookie-based sessions backed by Redis (`gin-contrib/sessions
   - `HttpOnly: true` (prevents client-side script access)
   - `Secure: true` (enforced over HTTPS)
   - `SameSite: Lax`
-- **Protected Routes**: Protected endpoints use `middleware.AuthMiddleware()`. If the session is missing or expired, the server aborts with `401 Unauthorized`.
+- **Protected Routes**: Every request resolves the caller once from the session (`middleware.ResolveCaller`); protected endpoints additionally gate on having one (`middleware.RequireCaller`). If the session is missing, expired, or carries a learner id the server cannot read, the server aborts with `401 Unauthorized` in one shape.
 - **How to authenticate requests**:
   - When you call `POST /api/v1/login` or `POST /api/v1/register`, the response includes a `Set-Cookie: userSession=...` header.
   - Subsequent requests must include this cookie.

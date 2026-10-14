@@ -10,7 +10,6 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -23,20 +22,12 @@ func (h *Handler) CreateReview(c *gin.Context) {
 		return
 	}
 
-	session := sessions.Default(c)
-	userID := session.Get("user_id")
-	if userID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
 
-	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	_, err = h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
+	_, err := h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
 		UserID: intUserID,
 		CardID: int64(req.CardId),
 	})
@@ -50,9 +41,8 @@ func (h *Handler) CreateReview(c *gin.Context) {
 }
 
 func (h *Handler) GetReviews(c *gin.Context) {
-	intUserID, ok := callerID(c)
+	intUserID, ok := requireCaller(c)
 	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
@@ -104,9 +94,8 @@ func (h *Handler) GetReviews(c *gin.Context) {
 // Review schedule it is given rather than computing one. Each entry is settled on
 // its own, so one refused Grade is not a failed batch.
 func (h *Handler) SubmitGrades(c *gin.Context) {
-	caller, ok := callerID(c)
+	caller, ok := requireCaller(c)
 	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
@@ -243,17 +232,8 @@ func cardsOfDeck(cards []db.Card, deckID int64) []db.Card {
 // device took the scheduler over. It stays for the clients built against it; a
 // Grade sent to the batch route is stored as the device computed it.
 func (h *Handler) UpdateReview(c *gin.Context) {
-	session := sessions.Default(c)
-	userID := session.Get("user_id")
-	if userID == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	intUserID, err := strconv.ParseInt(userID.(string), 10, 64)
-
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	intUserID, ok := requireCaller(c)
+	if !ok {
 		return
 	}
 
@@ -401,9 +381,8 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 }
 
 func (h *Handler) GetReviewsSince(c *gin.Context) {
-	intUserID, ok := callerID(c)
+	intUserID, ok := requireCaller(c)
 	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 

@@ -40,6 +40,13 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	api := router.Group("/api")
+	// The caller is resolved once, for both groups: private routes additionally
+	// gate on having been resolved. Without a session store there is no session to
+	// resolve a caller from, so nothing resolves and every private route answers
+	// 401 rather than panicking on a session it does not have.
+	if sessionStore != nil {
+		api.Use(middleware.ResolveCaller())
+	}
 	{
 		// /api/v1
 		v1public := api.Group("/v1")
@@ -60,7 +67,7 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 		}
 
 		v1private := api.Group("/v1")
-		v1private.Use(middleware.AuthMiddleware())
+		v1private.Use(middleware.RequireCaller())
 		{
 			v1private.POST("/logout", handler.Logout)
 
