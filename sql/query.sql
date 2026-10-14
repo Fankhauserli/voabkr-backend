@@ -152,6 +152,27 @@ WHERE id IN
 (SELECT card_id FROM user_cards
 WHERE user_id = $1 AND next_review_at <= NOW());
 
+-- name: ListUnstudiedCardsByDeck :many
+SELECT c.* FROM cards c
+WHERE c.deck_id = $1
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM user_cards uc
+    WHERE uc.user_id = $2 AND uc.card_id = c.id
+  )
+ORDER BY c.id ASC
+LIMIT $3;
+
+-- name: ListUnstudiedCards :many
+SELECT c.* FROM cards c
+WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM user_cards uc
+    WHERE uc.user_id = $1 AND uc.card_id = c.id
+  )
+ORDER BY c.id ASC
+LIMIT $2;
+
 
 -- name: UpdateUserCard :exec
 UPDATE user_cards
@@ -174,7 +195,25 @@ LIMIT 1;
 
 -- name: ListCards :many
 SELECT * FROM cards
-WHERE deleted_at > NOW() OR deleted_at IS NULL;
+WHERE deleted_at > NOW() OR deleted_at IS NULL
+ORDER BY id ASC;
+
+-- name: ListCardsByDeck :many
+SELECT * FROM cards
+WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
+ORDER BY id ASC
+LIMIT $2 OFFSET $3;
+
+-- name: ListCardsByDeckAll :many
+SELECT * FROM cards
+WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
+ORDER BY id ASC;
+
+-- name: ListCardsPaged :many
+SELECT * FROM cards
+WHERE (deleted_at > NOW() OR deleted_at IS NULL)
+ORDER BY id ASC
+LIMIT $1 OFFSET $2;
 
 -- name: CreateCard :one
 INSERT INTO cards (

@@ -110,31 +110,37 @@ func (h *Handler) GetReviews(c *gin.Context) {
 	}
 
 	if len(returnCards) < limit {
-		allUserCards, _ := h.DB.GetUserCards(c.Request.Context(), intUserID)
-		for _, uc := range allUserCards {
-			reviewedCardIDs[uc.CardID] = true
+		needed := int32(limit - len(returnCards))
+		var unstudied []db.Card
+		var uErr error
+		if targetDeckID > 0 {
+			unstudied, uErr = h.DB.ListUnstudiedCardsByDeck(c.Request.Context(), db.ListUnstudiedCardsByDeckParams{
+				DeckID: targetDeckID,
+				UserID: intUserID,
+				Limit:  needed,
+			})
+		} else {
+			unstudied, uErr = h.DB.ListUnstudiedCards(c.Request.Context(), db.ListUnstudiedCardsParams{
+				UserID: intUserID,
+				Limit:  needed,
+			})
 		}
 
-		allCards, _ := h.DB.ListCards(c.Request.Context())
-		for _, c := range allCards {
-			if len(returnCards) >= limit {
-				break
+		if uErr == nil {
+			for _, c := range unstudied {
+				if reviewedCardIDs[c.ID] {
+					continue
+				}
+				reviewedCardIDs[c.ID] = true
+				returnCards = append(returnCards, types.Card{
+					Id:          uint32(c.ID),
+					DeckId:      uint32(c.DeckID),
+					KoreanWord:  c.KoreanWord,
+					EnglishWord: c.EnglishWord,
+					Context:     c.Context.String,
+					Example:     c.ExampleSentence.String,
+				})
 			}
-			if targetDeckID > 0 && c.DeckID != targetDeckID {
-				continue
-			}
-			if reviewedCardIDs[c.ID] {
-				continue
-			}
-			reviewedCardIDs[c.ID] = true
-			returnCards = append(returnCards, types.Card{
-				Id:          uint32(c.ID),
-				DeckId:      uint32(c.DeckID),
-				KoreanWord:  c.KoreanWord,
-				EnglishWord: c.EnglishWord,
-				Context:     c.Context.String,
-				Example:     c.ExampleSentence.String,
-			})
 		}
 	}
 

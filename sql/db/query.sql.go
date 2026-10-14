@@ -788,10 +788,132 @@ func (q *Queries) HardDeleteUser(ctx context.Context, id int64) error {
 const listCards = `-- name: ListCards :many
 SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
 WHERE deleted_at > NOW() OR deleted_at IS NULL
+ORDER BY id ASC
 `
 
 func (q *Queries) ListCards(ctx context.Context) ([]Card, error) {
 	rows, err := q.db.Query(ctx, listCards)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Card
+	for rows.Next() {
+		var i Card
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.KoreanWord,
+			&i.EnglishWord,
+			&i.Context,
+			&i.ExampleSentence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCardsByDeck = `-- name: ListCardsByDeck :many
+SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
+WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
+ORDER BY id ASC
+LIMIT $2 OFFSET $3
+`
+
+type ListCardsByDeckParams struct {
+	DeckID int64
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListCardsByDeck(ctx context.Context, arg ListCardsByDeckParams) ([]Card, error) {
+	rows, err := q.db.Query(ctx, listCardsByDeck, arg.DeckID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Card
+	for rows.Next() {
+		var i Card
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.KoreanWord,
+			&i.EnglishWord,
+			&i.Context,
+			&i.ExampleSentence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCardsByDeckAll = `-- name: ListCardsByDeckAll :many
+SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
+WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
+ORDER BY id ASC
+`
+
+func (q *Queries) ListCardsByDeckAll(ctx context.Context, deckID int64) ([]Card, error) {
+	rows, err := q.db.Query(ctx, listCardsByDeckAll, deckID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Card
+	for rows.Next() {
+		var i Card
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.KoreanWord,
+			&i.EnglishWord,
+			&i.Context,
+			&i.ExampleSentence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCardsPaged = `-- name: ListCardsPaged :many
+SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
+WHERE (deleted_at > NOW() OR deleted_at IS NULL)
+ORDER BY id ASC
+LIMIT $1 OFFSET $2
+`
+
+type ListCardsPagedParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListCardsPaged(ctx context.Context, arg ListCardsPagedParams) ([]Card, error) {
+	rows, err := q.db.Query(ctx, listCardsPaged, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -976,6 +1098,100 @@ func (q *Queries) ListPublicDecks(ctx context.Context) ([]Deck, error) {
 			&i.OwnerID,
 			&i.IsPublic,
 			&i.ShareToken,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnstudiedCards = `-- name: ListUnstudiedCards :many
+SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
+WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM user_cards uc
+    WHERE uc.user_id = $1 AND uc.card_id = c.id
+  )
+ORDER BY c.id ASC
+LIMIT $2
+`
+
+type ListUnstudiedCardsParams struct {
+	UserID int64
+	Limit  int32
+}
+
+func (q *Queries) ListUnstudiedCards(ctx context.Context, arg ListUnstudiedCardsParams) ([]Card, error) {
+	rows, err := q.db.Query(ctx, listUnstudiedCards, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Card
+	for rows.Next() {
+		var i Card
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.KoreanWord,
+			&i.EnglishWord,
+			&i.Context,
+			&i.ExampleSentence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnstudiedCardsByDeck = `-- name: ListUnstudiedCardsByDeck :many
+SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
+WHERE c.deck_id = $1
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM user_cards uc
+    WHERE uc.user_id = $2 AND uc.card_id = c.id
+  )
+ORDER BY c.id ASC
+LIMIT $3
+`
+
+type ListUnstudiedCardsByDeckParams struct {
+	DeckID int64
+	UserID int64
+	Limit  int32
+}
+
+func (q *Queries) ListUnstudiedCardsByDeck(ctx context.Context, arg ListUnstudiedCardsByDeckParams) ([]Card, error) {
+	rows, err := q.db.Query(ctx, listUnstudiedCardsByDeck, arg.DeckID, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Card
+	for rows.Next() {
+		var i Card
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeckID,
+			&i.KoreanWord,
+			&i.EnglishWord,
+			&i.Context,
+			&i.ExampleSentence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}

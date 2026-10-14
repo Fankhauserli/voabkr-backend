@@ -26,9 +26,38 @@ func (h *Handler) GetCards(c *gin.Context) {
 		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
 	}
 
-	cacheKey := "cards:all"
-	if targetDeckID > 0 {
+	// limit and offset are opt-in: a request that sends neither gets every Card,
+	// as it did before paging existed.
+	paged := c.Query("limit") != "" || c.Query("offset") != ""
+
+	limit := int32(100)
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 {
+			if l > 500 {
+				limit = 500
+			} else {
+				limit = int32(l)
+			}
+		}
+	}
+
+	offset := int32(0)
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if o, err := strconv.ParseInt(offsetStr, 10, 32); err == nil && o >= 0 {
+			offset = int32(o)
+		}
+	}
+
+	var cacheKey string
+	switch {
+	case targetDeckID > 0 && paged:
+		cacheKey = fmt.Sprintf("cards:deck:%d:lim%d:off%d", targetDeckID, limit, offset)
+	case targetDeckID > 0:
 		cacheKey = fmt.Sprintf("cards:deck:%d", targetDeckID)
+	case paged:
+		cacheKey = fmt.Sprintf("cards:all:lim%d:off%d", limit, offset)
+	default:
+		cacheKey = "cards:all"
 	}
 
 	if h.Cache != nil {
@@ -39,25 +68,45 @@ func (h *Handler) GetCards(c *gin.Context) {
 		}
 	}
 
-	cards, err := h.DB.ListCards(c.Request.Context())
+	if h.DB == nil {
+		c.JSON(http.StatusOK, []*types.Card{})
+		return
+	}
+
+	var cards []db.Card
+	var err error
+	switch {
+	case targetDeckID > 0 && paged:
+		cards, err = h.DB.ListCardsByDeck(c.Request.Context(), db.ListCardsByDeckParams{
+			DeckID: targetDeckID,
+			Limit:  limit,
+			Offset: offset,
+		})
+	case targetDeckID > 0:
+		cards, err = h.DB.ListCardsByDeckAll(c.Request.Context(), targetDeckID)
+	case paged:
+		cards, err = h.DB.ListCardsPaged(c.Request.Context(), db.ListCardsPagedParams{
+			Limit:  limit,
+			Offset: offset,
+		})
+	default:
+		cards, err = h.DB.ListCards(c.Request.Context())
+	}
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
-	returnCards := make([]*types.Card, 0)
-
-	for _, c := range cards {
-		if targetDeckID > 0 && c.DeckID != targetDeckID {
-			continue
-		}
+	returnCards := make([]*types.Card, 0, len(cards))
+	for _, card := range cards {
 		returnCards = append(returnCards, &types.Card{
-			Id:          uint32(c.ID),
-			DeckId:      uint32(c.DeckID),
-			KoreanWord:  c.KoreanWord,
-			EnglishWord: c.EnglishWord,
-			Context:     c.Context.String,
-			Example:     c.ExampleSentence.String,
+			Id:          uint32(card.ID),
+			DeckId:      uint32(card.DeckID),
+			KoreanWord:  card.KoreanWord,
+			EnglishWord: card.EnglishWord,
+			Context:     card.Context.String,
+			Example:     card.ExampleSentence.String,
 		})
 	}
 
