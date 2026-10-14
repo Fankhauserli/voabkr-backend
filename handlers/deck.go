@@ -28,14 +28,14 @@ func (h *Handler) GetDecks(c *gin.Context) {
 
 	// 1. Unauthenticated (Guests) -> return only public decks
 	if sessionUserID == nil {
+		// decks:public holds public Decks alone, so it reads the same for every
+		// sessionless caller. An entry that could hold a private Deck must not
+		// answer here: which Decks a caller may list is a decision about the
+		// caller, and per ADR-0001 a cached entry holds data, never decisions.
 		cacheKey := "decks:public"
 		if h.Cache != nil {
 			var cachedList types.DeckList
 			if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedList); err == nil && found {
-				c.JSON(http.StatusOK, cachedList.Decks)
-				return
-			}
-			if found, err := h.Cache.GetProto(c.Request.Context(), "decks:all", &cachedList); err == nil && found {
 				c.JSON(http.StatusOK, cachedList.Decks)
 				return
 			}

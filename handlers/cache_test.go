@@ -34,13 +34,14 @@ func TestGetDecksCacheHit(t *testing.T) {
 	}
 	defer c.Close()
 
-	// Pre-populate cache
+	// Pre-populate the one entry an anonymous caller's listing is answered from:
+	// public Decks, and only public Decks.
 	cachedDecks := []*types.Deck{
 		{Id: 1, Name: "Cached Deck 1", Type: "vocabulary"},
 		{Id: 2, Name: "Cached Deck 2", Type: "grammar"},
 	}
 	ctx := context.Background()
-	_ = c.SetProto(ctx, "decks:all", &types.DeckList{Decks: cachedDecks}, 5*time.Minute)
+	_ = c.SetProto(ctx, "decks:public", &types.DeckList{Decks: cachedDecks}, 5*time.Minute)
 
 	// Handler with nil DB - proving DB is not touched on cache hit
 	h := handlers.NewHandler(nil, c)

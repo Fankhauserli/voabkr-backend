@@ -118,3 +118,40 @@ func TestGetDeckByIDMissingDeckNotFound(t *testing.T) {
 		t.Fatalf("expected status 404 for a missing deck, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+const decksRoute = "/api/v1/decks/"
+
+// A warm decks:all entry — a key named for every Deck on the instance, holding a
+// private Deck's Access role and share token — does not answer an anonymous
+// caller's listing, whoever left it there. Which Decks a caller may list is a
+// decision about the caller, so only decks:public, an entry holding public Decks
+// alone, serves it.
+func TestGetDecksForAnonymousCallerIgnoresWarmDecksAllEntry(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	deckID := seedDeck(t, owner, false)
+
+	_ = h.Cache.SetProto(context.Background(), "decks:all", &types.DeckList{Decks: []*types.Deck{{
+		Id:             uint32(deckID),
+		Name:           "Seeded Deck",
+		Type:           "vocabulary",
+		OwnerId:        uint32(owner),
+		IsPublic:       false,
+		ShareToken:     "sec_seed_1",
+		UserAccessRole: access.RoleOwner,
+	}}}, 5*time.Minute)
+
+	w := get(t, h.GetDecks, access.Anonymous, decksRoute, decksRoute)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for an anonymous caller, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var decks []types.Deck
+	if err := json.Unmarshal(w.Body.Bytes(), &decks); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+	if len(decks) != 0 {
+		t.Fatalf("expected no decks for an anonymous caller, got %s", w.Body.String())
+	}
+}
