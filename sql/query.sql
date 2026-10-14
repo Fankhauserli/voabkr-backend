@@ -214,8 +214,10 @@ DELETE FROM user_cards
 WHERE user_id = $1 AND card_id = $2;
 
 -- name: GetCard :one
+-- A Card the listings no longer carry is not read, written or graded: every path
+-- that names one Card by id reads it through this.
 SELECT * FROM cards
-WHERE id = $1
+WHERE id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
 LIMIT 1;
 
 -- name: ListAccessibleCards :many

@@ -17,6 +17,7 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/cache"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -51,17 +52,10 @@ type Page struct {
 
 // The Card keys are built here and nowhere else. A Deck's Cards live under the
 // Deck, and a paged read under the window it asked for.
-func DeckPrefix(deckID int64) string { return fmt.Sprintf("cards:deck:%d", deckID) }
+func deckKey(deckID int64) string { return fmt.Sprintf("cards:deck:%d", deckID) }
 
-// Prefix is what every Card entry begins with, for the one write that clears them
-// without reading a Card: erasing an account takes the Cards of Decks it owned.
-func Prefix() string { return "cards:" }
-
-func deckKey(deckID int64, page Page) string {
-	if !page.Paged {
-		return DeckPrefix(deckID)
-	}
-	return fmt.Sprintf("%s:lim%d:off%d", DeckPrefix(deckID), page.Limit, page.Offset)
+func deckPageKey(deckID int64, page Page) string {
+	return fmt.Sprintf("%s:lim%d:off%d", deckKey(deckID), page.Limit, page.Offset)
 }
 
 // Card is a Card with what a request about it needs beside its body: the Deck
@@ -76,29 +70,28 @@ type Card struct {
 }
 
 // ByID returns cardID as every caller reads it, and the Deck that holds it. A
-// Card that is not there, or one the listings no longer carry, is ErrNoSuchCard.
+// Card that is not there — deleted included, which the query reads as gone — is
+// ErrNoSuchCard.
 func (r *Reader) ByID(ctx context.Context, cardID int64) (Card, error) {
 	row, err := r.db.GetCard(ctx, cardID)
-	if err != nil {
-		return Card{}, fmt.Errorf("%w: %v", ErrNoSuchCard, err)
-	}
-	if deleted(row) {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
 		return Card{}, ErrNoSuchCard
+	case err != nil:
+		// A database that cannot answer is not a Card that is not there.
+		return Card{}, fmt.Errorf("failed to read the Card: %w", err)
 	}
 
 	return Card{Body: bodyOf(row), DeckID: row.DeckID}, nil
 }
 
-// deleted reports whether a Card row is one the listings no longer carry: they
-// read a Card as gone once the moment it was deleted at has passed.
-func deleted(card db.Card) bool {
-	return card.DeletedAt.Valid && !card.DeletedAt.Time.After(time.Now())
-}
-
 // ByDeck returns the Deck's Cards as every caller reads them — the Deck's
 // contents, which are the same for all — so an entry answers it.
 func (r *Reader) ByDeck(ctx context.Context, deckID int64, page Page) ([]*types.Card, error) {
-	key := deckKey(deckID, page)
+	key := deckKey(deckID)
+	if page.Paged {
+		key = deckPageKey(deckID, page)
+	}
 	if r.cache != nil {
 		var cached types.CardList
 		if found, err := r.cache.GetProto(ctx, key, &cached); err == nil && found {
@@ -123,7 +116,7 @@ func (r *Reader) ByDeck(ctx context.Context, deckID int64, page Page) ([]*types.
 		return nil, err
 	}
 
-	cards := bodiesOf(rows)
+	cards := Bodies(rows)
 	if r.cache != nil {
 		_ = r.cache.SetProto(ctx, key, &types.CardList{Cards: cards}, entryTTL)
 	}
@@ -150,7 +143,7 @@ func (r *Reader) ForCaller(ctx context.Context, caller int64, page Page) ([]*typ
 		return nil, err
 	}
 
-	return bodiesOf(rows), nil
+	return Bodies(rows), nil
 }
 
 // AttachSchedules gives each Card the caller's own Review schedule of it, read
@@ -193,7 +186,7 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 	if r.cache == nil {
 		return
 	}
-	_ = r.cache.DeletePrefix(ctx, DeckPrefix(deckID))
+	_ = r.cache.DeletePrefix(ctx, deckKey(deckID))
 }
 
 // bodyOf is the one row→wire mapping: a Card as callers see it, carrying no
@@ -212,10 +205,7 @@ func bodyOf(card db.Card) *types.Card {
 // Bodies renders rows a caller's own query read — the Review queue reads its
 // Cards itself — as the wire carries them. It is the same mapping a listing gets,
 // so a new Card field is remembered in one place.
-func Bodies(rows []db.Card) []*types.Card { return bodiesOf(rows) }
-
-// bodiesOf renders a listing's rows, in the one place that does.
-func bodiesOf(rows []db.Card) []*types.Card {
+func Bodies(rows []db.Card) []*types.Card {
 	cards := make([]*types.Card, 0, len(rows))
 	for _, row := range rows {
 		cards = append(cards, bodyOf(row))

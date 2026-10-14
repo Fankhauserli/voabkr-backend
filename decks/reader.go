@@ -17,7 +17,6 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/cache"
-	"github.com/Fankhauserli/voabkr-backend/cards"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -221,8 +220,9 @@ func (r *Reader) Shared(ctx context.Context, token string) (SharedDeck, error) {
 	return SharedDeck{Deck: shared, OwnerName: ownerName}, nil
 }
 
-// Invalidate drops every entry holding the Deck, or made from it: its Cards, the
-// public listing its name appears in, and the entry its share link answers under.
+// Invalidate drops every entry holding the Deck: the public listing its name
+// appears in, and the entry its share link answers under. What holds its Cards
+// is the Card reader's to clear, and deleting the Deck asks it to.
 //
 // It reads the Deck to find the token that link is keyed by, so a caller who is
 // deleting the Deck calls it while the row is still there.
@@ -232,7 +232,6 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 	}
 
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
-	_ = r.cache.DeletePrefix(ctx, cards.DeckPrefix(deckID))
 
 	deck, err := r.db.GetDeck(ctx, deckID)
 	if err != nil {
@@ -250,16 +249,15 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 // InvalidateEveryDeck drops what any Deck is held under. One caller needs this
 // rather than writing through the Deck: erasing a learner's account hands their
 // Decks to no one (the foreign key sets the owner to NULL), so the Decks stay
-// and become System decks — and their Cards, the listing they appear in, and
-// every link they answer under go with the erased standing.
+// and become System decks — and the body every listing served of them, naming
+// the erased learner as owner, goes with the erased standing.
 //
-// Every link entry goes, not only those of the erased learner's Decks: which
+// Every link entry goes too, not only those of the erased learner's Decks: which
 // Decks were theirs is no longer readable from the row that would say.
 func (r *Reader) InvalidateEveryDeck(ctx context.Context) {
 	if r.cache == nil {
 		return
 	}
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
-	_ = r.cache.DeletePrefix(ctx, cards.Prefix())
 	_ = r.cache.DeletePrefix(ctx, sharedPrefix)
 }

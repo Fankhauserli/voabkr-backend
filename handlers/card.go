@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -27,13 +28,13 @@ func (h *Handler) GetCards(c *gin.Context) {
 	}
 
 	var (
-		cards []*types.Card
-		err   error
+		bodies []*types.Card
+		err    error
 	)
 	if targetDeckID > 0 {
-		cards, err = h.Cards.ByDeck(c.Request.Context(), targetDeckID, page)
+		bodies, err = h.Cards.ByDeck(c.Request.Context(), targetDeckID, page)
 	} else {
-		cards, err = h.Cards.ForCaller(c.Request.Context(), caller, page)
+		bodies, err = h.Cards.ForCaller(c.Request.Context(), caller, page)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
@@ -42,12 +43,12 @@ func (h *Handler) GetCards(c *gin.Context) {
 
 	// The Review schedules are the caller's own, so they are attached on the way
 	// out rather than held in the entry the Cards came from.
-	if err := h.Cards.AttachSchedules(c.Request.Context(), caller, cards); err != nil {
+	if err := h.Cards.AttachSchedules(c.Request.Context(), caller, bodies); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, cards)
+	c.JSON(http.StatusOK, bodies)
 }
 
 // cardQuery reads the Deck a listing is filtered by, and the window it asks for.
@@ -129,8 +130,12 @@ func (h *Handler) GetCardByID(c *gin.Context) {
 	// The Card belongs to a Deck, and the Deck decides who may read it. The Card
 	// is therefore read every time and the caller settled before anything answers.
 	card, err := h.Cards.ByID(c.Request.Context(), id)
-	if err != nil {
+	switch {
+	case errors.Is(err, cards.ErrNoSuchCard):
 		respondWithError(c, http.StatusNotFound, "Card not found", err)
+		return
+	case err != nil:
+		respondWithError(c, http.StatusInternalServerError, "Failed to get card", err)
 		return
 	}
 
@@ -240,21 +245,12 @@ func (h *Handler) DeleteCard(c *gin.Context) {
 // Both an edit and a delete go through here, so the rule is applied in one place
 // rather than re-spelled per handler.
 func (h *Handler) requireWritableCard(c *gin.Context) (db.Card, bool) {
-	id, isValid := c.Params.Get("id")
-	if !isValid {
-		log.Printf("[WARN] Card: Failed to get card id")
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id", nil)
+	id, ok := cardParam(c)
+	if !ok {
 		return db.Card{}, false
 	}
 
-	intId, err := strconv.ParseInt(id, 10, 64)
-	if err != nil {
-		log.Printf("[WARN] Card: Failed to get card id as int: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id as int", err)
-		return db.Card{}, false
-	}
-
-	card, err := h.DB.GetCard(c.Request.Context(), intId)
+	card, err := h.DB.GetCard(c.Request.Context(), id)
 	if err != nil {
 		log.Printf("[WARN] Card: failed to get card: %v", err)
 		respondWithError(c, http.StatusNotFound, "Card not found", err)

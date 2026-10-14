@@ -9,7 +9,6 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/decks"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // requireCaller returns the id of the learner making this request, answering 401
@@ -113,10 +112,4 @@ func (h *Handler) requireDeckOwner(c *gin.Context, deckID, caller int64, refusal
 	}
 
 	return standing, true
-}
-
-// callerParam carries a caller id into a query that filters by access. An
-// anonymous caller is NULL, which matches no owner and no DeckShare.
-func callerParam(caller int64) pgtype.Int8 {
-	return pgtype.Int8{Int64: caller, Valid: caller != access.Anonymous}
 }

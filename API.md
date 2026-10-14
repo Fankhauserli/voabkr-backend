@@ -501,6 +501,10 @@ Retrieves a card by ID.
     "example": "도서관에서 책을 읽어요."
   }
   ```
+- **Responses**:
+  - `200 OK`: the Card, carrying the caller's own `reviewSchedule` when they have studied it
+  - `403 Forbidden`: `{"error": "Access to this private deck is restricted"}` — the caller may not read the Deck holding the Card
+  - `404 Not Found`: `{"error": "Card not found"}` — no such Card, or one deleted: every Card read path reads a deleted Card as gone
 
 #### `PUT /api/v1/cards/:id`
 Updates card details.

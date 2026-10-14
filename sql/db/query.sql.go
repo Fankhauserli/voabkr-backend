@@ -428,10 +428,12 @@ func (q *Queries) DeleteVerificationTokensByUserID(ctx context.Context, userID i
 
 const getCard = `-- name: GetCard :one
 SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
-WHERE id = $1
+WHERE id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
 LIMIT 1
 `
 
+// A Card the listings no longer carry is not read, written or graded: every path
+// that names one Card by id reads it through this.
 func (q *Queries) GetCard(ctx context.Context, id int64) (Card, error) {
 	row := q.db.QueryRow(ctx, getCard, id)
 	var i Card

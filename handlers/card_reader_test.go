@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/handlers"
 	"github.com/Fankhauserli/voabkr-backend/types"
 )
 
@@ -119,6 +120,84 @@ func TestGetCardByIDCarriesTheCallersSchedule(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A paged listing is answered from an entry of its own, and a write clears that
+// too: the window a learner reads next is the Deck's Cards as they are now.
+func TestGetCardsPagedAfterCreatingACard(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	deckID := seedDeck(t, owner, false)
+	paged := cardsPath(deckID) + "&limit=1&offset=0"
+
+	if words := listedWords(t, h, owner, paged); len(words) != 0 {
+		t.Fatalf("expected an empty window to begin with, got %v", words)
+	}
+
+	w := post(t, h.CreateCards, owner, cardsRoute, cardsRoute, cardWriteBody(deckID, "나무", "tree"))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("failed to create the Card: %d: %s", w.Code, w.Body.String())
+	}
+
+	if words := listedWords(t, h, owner, paged); !slices.Equal(words, []string{"나무"}) {
+		t.Fatalf("expected the created Card in the window, got %v", words)
+	}
+}
+
+// Moving a Card between Decks leaves neither Deck's entry stale.
+func TestGetCardsAfterMovingACardBetweenDecks(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	learner := seedUser(t, "learner@example.com")
+	fromDeck := seedDeck(t, owner, false)
+	toDeck := seedDeck(t, owner, false)
+	cardID := seedCard(t, fromDeck, "나무", "tree")
+	seedShare(t, fromDeck, learner, access.RoleEdit)
+	seedShare(t, toDeck, learner, access.RoleEdit)
+
+	if words := deckCardWords(t, h, learner, fromDeck); !slices.Equal(words, []string{"나무"}) {
+		t.Fatalf("expected the Card in the Deck that holds it, got %v", words)
+	}
+	if words := deckCardWords(t, h, learner, toDeck); len(words) != 0 {
+		t.Fatalf("expected the other Deck to be empty, got %v", words)
+	}
+
+	w := put(t, h.UpdateCard, learner, cardRoute, cardPath(cardID), cardWriteBody(toDeck, "나무", "tree"))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("failed to move the Card: %d: %s", w.Code, w.Body.String())
+	}
+
+	if words := deckCardWords(t, h, learner, fromDeck); len(words) != 0 {
+		t.Fatalf("expected the moved Card to leave its old Deck, got %v", words)
+	}
+	if words := deckCardWords(t, h, learner, toDeck); !slices.Equal(words, []string{"나무"}) {
+		t.Fatalf("expected the moved Card in its new Deck, got %v", words)
+	}
+}
+
+// A Card that is not there is not found — a failure to read it would be a
+// different answer.
+func TestGetCardByIDMissingCardNotFound(t *testing.T) {
+	h := newTestHandler(t)
+	owner := seedUser(t, "owner@example.com")
+	seedDeck(t, owner, false)
+
+	w := get(t, h.GetCardByID, owner, cardRoute, cardPath(99999))
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404 for a Card that is not there, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// listedWords returns the words a listing path answers with.
+func listedWords(t *testing.T, h *handlers.Handler, caller int64, path string) []string {
+	t.Helper()
+
+	w := get(t, h.GetCards, caller, cardsRoute, path)
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to read the listing: %d: %s", w.Code, w.Body.String())
+	}
+	return cardWords(t, w.Body.Bytes())
 }
 
 // The guest listing of a public Deck is the same Cards, with no schedule for a
