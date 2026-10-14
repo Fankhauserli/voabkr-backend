@@ -141,7 +141,7 @@ func TestValkeyStoreSessionLifecycle(t *testing.T) {
 		Dialer: net.Dialer{
 			Timeout: 2 * time.Second,
 		},
-		AlwaysRESP2: true,
+		AlwaysRESP2:  true,
 		DisableCache: true,
 	})
 	if err != nil {
@@ -256,7 +256,7 @@ func newTestSessionStore(t *testing.T) *ValkeyStore {
 
 func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := &handlers.Handler{}
+	h := handlers.NewHandler(nil, nil)
 
 	store := newTestSessionStore(t)
 
@@ -286,4 +286,3 @@ func TestSetupRouterNoDuplicateRoutes(t *testing.T) {
 		t.Fatalf("session middleware was not registered on /api/v1/login: %s", w.Body.String())
 	}
 }
-

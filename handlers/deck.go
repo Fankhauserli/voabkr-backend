@@ -81,7 +81,7 @@ func (h *Handler) CreateDeck(c *gin.Context) {
 		return
 	}
 
-	_ = h.Decks.Invalidate(c.Request.Context(), newDeck.ID)
+	h.Decks.Invalidate(c.Request.Context(), newDeck.ID)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Deck created",
@@ -145,8 +145,9 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 		return
 	}
 
-	// Only owner can change public/private visibility
-	isPublicToSet := standing.Body().IsPublic
+	// Only owner can change public/private visibility — a decision about the
+	// Deck, read from the row, where the body is for responses.
+	isPublicToSet := standing.Deck.IsPublic
 	if access.Owns(standing.Deck, intUserID) {
 		isPublicToSet = req.IsPublic
 	}
@@ -163,7 +164,7 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 		return
 	}
 
-	_ = h.Decks.Invalidate(c.Request.Context(), intId)
+	h.Decks.Invalidate(c.Request.Context(), intId)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deck updated"})
 }
@@ -191,7 +192,7 @@ func (h *Handler) DeleteDeck(c *gin.Context) {
 
 	// Cleared while the row is still there: the share-link entry is keyed by the
 	// token the row carries.
-	_ = h.Decks.Invalidate(c.Request.Context(), intId)
+	h.Decks.Invalidate(c.Request.Context(), intId)
 
 	err = h.DB.DeleteDeck(c.Request.Context(), intId)
 	if err != nil {
@@ -262,7 +263,7 @@ func (h *Handler) ShareDeck(c *gin.Context) {
 		}
 	}
 
-	_ = h.Decks.Invalidate(c.Request.Context(), intId)
+	h.Decks.Invalidate(c.Request.Context(), intId)
 
 	c.JSON(http.StatusOK, gin.H{
 		"shareToken": shareToken,
@@ -336,7 +337,7 @@ func (h *Handler) JoinSharedDeck(c *gin.Context) {
 		return
 	}
 
-	_ = h.Decks.Invalidate(c.Request.Context(), int64(shared.Deck.Id))
+	h.Decks.Invalidate(c.Request.Context(), int64(shared.Deck.Id))
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Deck added to your study library",
@@ -368,7 +369,7 @@ func (h *Handler) RevokeDeckShare(c *gin.Context) {
 		return
 	}
 
-	_ = h.Decks.Invalidate(c.Request.Context(), deckID)
+	h.Decks.Invalidate(c.Request.Context(), deckID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Access revoked successfully"})
 }

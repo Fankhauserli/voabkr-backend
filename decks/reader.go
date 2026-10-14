@@ -1,10 +1,12 @@
 // Package decks owns reading a Deck end to end: which cache entry answers it,
-// the fetch on miss, the shape it takes on the wire, and which entries a write
-// invalidates. Callers ask for a Deck and never see a database row or a key.
+// the fetch on miss, the shape it takes on the wire, the Access role the caller
+// reads it under, and which entries a write invalidates. Callers ask for a Deck
+// rather than assembling one, and hold no key.
 //
-// Entries hold data every caller reads alike — a Deck's name and its Cards — and
-// never the Access role of whoever warmed them, which is resolved per request
-// (ADR-0001).
+// An entry holds data every caller reads alike — a Deck's name, the public
+// listing — and never anything derived from who is asking: an Access role is
+// resolved per request from the Deck and the caller's own DeckShare, and a
+// listing of one learner's own standing is no entry at all (ADR-0001).
 package decks
 
 import (
@@ -34,17 +36,16 @@ type Reader struct {
 	cache cache.Cache
 }
 
-// NewReader returns a Reader over the database and cache it is given. Either may
-// be nil, and then it answers as an instance holding neither.
+// NewReader returns a Reader over the database a Deck is read from and the cache
+// it is held in. A nil cache means an instance that holds nothing; a Deck is
+// read from the database either way.
 func NewReader(q *db.Queries, c cache.Cache) *Reader {
 	return &Reader{db: q, cache: c}
 }
 
-// The keys a Deck is held under, built here and nowhere else. Note that no
-// prefix matches the share-link entry: a Deck and its link are keyed differently
-// — by id, and by token — so a write clears the link through the Deck the token
-// belongs to.
-func deckKey(deckID int64) string   { return fmt.Sprintf("deck:%d", deckID) }
+// The Deck keys are built here and nowhere else. Note that no prefix matches the
+// share-link entry: a Deck and its link are keyed differently — by token — so a
+// write clears the link through the Deck the token belongs to.
 func sharedKey(token string) string { return fmt.Sprintf("deck:shared:%s", token) }
 
 // publicListingKey holds the public Decks alone, which every sessionless caller
@@ -53,16 +54,12 @@ func sharedKey(token string) string { return fmt.Sprintf("deck:shared:%s", token
 // holds data, never decisions (ADR-0001).
 const publicListingKey = "decks:public"
 
-// listingKeyFor is where one learner's listing is held — the public Decks, their
-// own, and the ones shared with them.
-func listingKeyFor(caller int64) string { return fmt.Sprintf("decks:user:%d", caller) }
-
-// cardsOfKey is the prefix a Deck's Card entries share, held under the Deck.
+// cardsOfKey is the prefix a Deck's Card entries share, held under the Deck. The
+// Card reader builds those keys; what a Deck write has to clear is named here.
 func cardsOfKey(deckID int64) string { return fmt.Sprintf("cards:deck:%d", deckID) }
 
-// listingPrefix is what holds every listing a Deck appears in — a learner's own
-// Decks, and the public ones — where its name and its Access role are read.
-// There is no key naming one learner's listing, so a write clears them all.
+// listingPrefix is what holds a listing a Deck appears in — the public one, where
+// its name is read by every sessionless caller.
 const listingPrefix = "decks:"
 
 // allCardsPrefix is what holds every Deck's Cards. Only erasing a learner takes
@@ -97,10 +94,6 @@ func (s Standing) Body() *types.Deck { return bodyOf(s.Deck, s.Role) }
 // and the caller's own DeckShare, judging nothing by the answer. A Deck that is
 // not there is ErrNoSuchDeck.
 func (r *Reader) StandingOn(ctx context.Context, deckID, caller int64) (Standing, error) {
-	if r.db == nil {
-		return Standing{}, ErrNoSuchDeck
-	}
-
 	deck, err := r.db.GetDeck(ctx, deckID)
 	if err != nil {
 		return Standing{}, fmt.Errorf("%w: %v", ErrNoSuchDeck, err)
@@ -129,10 +122,6 @@ func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 		}
 	}
 
-	if r.db == nil {
-		return []*types.Deck{}, nil
-	}
-
 	rows, err := r.db.ListPublicDecks(ctx)
 	if err != nil {
 		return nil, err
@@ -142,25 +131,20 @@ func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 	for _, row := range rows {
 		decks = append(decks, bodyOf(row, access.RolePublic))
 	}
-	return r.hold(ctx, publicListingKey, decks), nil
+
+	if r.cache != nil {
+		_ = r.cache.SetProto(ctx, publicListingKey, &types.DeckList{Decks: decks}, entryTTL)
+	}
+	return decks, nil
 }
 
 // ForCaller returns the Decks caller reads — the public ones, their own, and the
-// ones shared with them — each carrying the Access role they read it under. The
-// list is the caller's own, so it is held under their key.
+// ones shared with them — each carrying the Access role they read it under.
+//
+// Nothing answers this from an entry: the list is a decision about the caller,
+// whose Decks and roles change with a DeckShare given or revoked, and a write
+// cannot know whose listing to clear (ADR-0001).
 func (r *Reader) ForCaller(ctx context.Context, caller int64) ([]*types.Deck, error) {
-	key := listingKeyFor(caller)
-	if r.cache != nil {
-		var cached types.DeckList
-		if found, err := r.cache.GetProto(ctx, key, &cached); err == nil && found {
-			return cached.Decks, nil
-		}
-	}
-
-	if r.db == nil {
-		return []*types.Deck{}, nil
-	}
-
 	rows, err := r.db.ListDecksForUser(ctx, pgtype.Int8{Int64: caller, Valid: true})
 	if err != nil {
 		return nil, err
@@ -172,7 +156,7 @@ func (r *Reader) ForCaller(ctx context.Context, caller int64) ([]*types.Deck, er
 	for _, row := range rows {
 		decks = append(decks, bodyOf(listedDeck(row), row.UserAccessRole))
 	}
-	return r.hold(ctx, key, decks), nil
+	return decks, nil
 }
 
 // listedDeck is a listing row as the Deck it carries: the query reads the Deck's
@@ -186,14 +170,6 @@ func listedDeck(row db.ListDecksForUserRow) db.Deck {
 		IsPublic:   row.IsPublic,
 		ShareToken: row.ShareToken,
 	}
-}
-
-// hold keeps a listing under the key it belongs to for as long as an entry lives.
-func (r *Reader) hold(ctx context.Context, key string, decks []*types.Deck) []*types.Deck {
-	if r.cache != nil {
-		_ = r.cache.SetProto(ctx, key, &types.DeckList{Decks: decks}, entryTTL)
-	}
-	return decks
 }
 
 // bodyOf is the one row→wire mapping: a Deck as callers see it, carrying the
@@ -226,10 +202,6 @@ func (r *Reader) Shared(ctx context.Context, token string) (SharedDeck, error) {
 		}
 	}
 
-	if r.db == nil {
-		return SharedDeck{}, ErrNoSuchDeck
-	}
-
 	deck, err := r.db.GetDeckByShareToken(ctx, pgtype.Text{String: token, Valid: true})
 	if err != nil {
 		return SharedDeck{}, fmt.Errorf("%w: %v", ErrNoSuchDeck, err)
@@ -252,33 +224,26 @@ func (r *Reader) Shared(ctx context.Context, token string) (SharedDeck, error) {
 	return SharedDeck{Deck: shared, OwnerName: ownerName}, nil
 }
 
-// Invalidate drops every entry holding the Deck, or made from it: the Deck's own
-// entry, its Cards, every listing it appears in, and the entry its share link
-// answers under.
+// Invalidate drops every entry holding the Deck, or made from it: its Cards, the
+// public listing its name appears in, and the entry its share link answers under.
 //
 // It reads the Deck to find the token that link is keyed by, so a caller who is
 // deleting the Deck calls it while the row is still there.
-func (r *Reader) Invalidate(ctx context.Context, deckID int64) error {
+func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 	if r.cache == nil {
-		return nil
+		return
 	}
 
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
-	_ = r.cache.Delete(ctx, deckKey(deckID))
 	_ = r.cache.DeletePrefix(ctx, cardsOfKey(deckID))
-
-	if r.db == nil {
-		return nil
-	}
 
 	deck, err := r.db.GetDeck(ctx, deckID)
 	if err != nil {
-		return nil
+		return
 	}
 	if deck.ShareToken.Valid && deck.ShareToken.String != "" {
 		_ = r.cache.Delete(ctx, sharedKey(deck.ShareToken.String))
 	}
-	return nil
 }
 
 // InvalidateEveryDeck drops what any Deck is held under, for the one caller that
