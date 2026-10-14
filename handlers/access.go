@@ -98,28 +98,51 @@ func (h *Handler) requireReadableDeck(c *gin.Context, deckID int64, caller int64
 	return standing, true
 }
 
-// requireDeckWrite loads a Deck and settles whether the caller may write its
-// Cards — add one, change one, delete one — resolving their Access role the same
-// way a read does and asking access/ what that standing permits. It answers the
-// request itself, and ok is false once it has: 404 when there is no such Deck,
-// 403 when there is but the caller's standing does not carry the write.
+// requireDeckEdit loads a Deck and settles whether the caller may change it or
+// what it holds — its name and type, and its Cards — resolving their Access role
+// the same way a read does and asking access/ what that standing permits. It
+// answers the request itself: 404 when there is no such Deck, and the refusal
+// the act asked for once the caller's standing does not carry the edit.
 //
-// Every write of a Card goes through here, so the rule is applied in one place
-// rather than re-spelled per handler.
-func (h *Handler) requireDeckWrite(c *gin.Context, deckID int64, caller int64) bool {
+// Every edit of a Deck or a Card goes through here, so the rule is applied in
+// one place rather than re-spelled per handler.
+func (h *Handler) requireDeckEdit(c *gin.Context, deckID int64, caller int64, refusal string) (deckStanding, bool) {
 	// The only way resolving a standing fails is a Deck that isn't there.
 	standing, err := h.deckStandingOn(c.Request.Context(), deckID, caller)
 	if err != nil {
 		respondWithError(c, http.StatusNotFound, "Deck not found", err)
-		return false
+		return deckStanding{}, false
 	}
 
-	if !access.CanWriteCards(standing.deck, standing.role) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to edit this deck's Cards"})
-		return false
+	if !access.CanEdit(standing.deck, standing.role) {
+		c.JSON(http.StatusForbidden, gin.H{"error": refusal})
+		return standing, false
 	}
 
-	return true
+	return standing, true
+}
+
+// requireDeckOwner loads a Deck and settles whether the caller may act on it as
+// its owner — delete it, share it, revoke one of its DeckShares. It answers the
+// request itself: 404 when there is no such Deck, and the refusal the act asked
+// for once the caller does not own it.
+//
+// Ownership is asked of access/, which fails closed: a System deck has no owner
+// for anyone to be, so it refuses every one of these acts.
+func (h *Handler) requireDeckOwner(c *gin.Context, deckID, caller int64, refusal string) (deckStanding, bool) {
+	// The only way resolving a standing fails is a Deck that isn't there.
+	standing, err := h.deckStandingOn(c.Request.Context(), deckID, caller)
+	if err != nil {
+		respondWithError(c, http.StatusNotFound, "Deck not found", err)
+		return deckStanding{}, false
+	}
+
+	if !access.Owns(standing.deck, caller) {
+		c.JSON(http.StatusForbidden, gin.H{"error": refusal})
+		return standing, false
+	}
+
+	return standing, true
 }
 
 // callerParam carries a caller id into a query that filters by access. An

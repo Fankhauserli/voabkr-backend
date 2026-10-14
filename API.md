@@ -399,8 +399,10 @@ Updates an existing deck.
   }
   ```
 - **Responses**:
-  - `202 Accepted`: `{"message": "Deck updated"}`
+  - `200 OK`: `{"message": "Deck updated"}`
   - `400 Bad Request`: `{"error": "Invalid request body"}`
+  - `403 Forbidden`: `{"error": "You do not have permission to edit this deck"}` — the caller is not the deck's owner and holds no edit permission on it, or the deck is a System deck, which is never edited
+  - `404 Not Found`: `{"error": "Deck not found"}`
   - `500 Internal Server Error`: `{"error": "Failed to update Deck"}`
 
 #### `DELETE /api/v1/decks/:id`
@@ -408,7 +410,9 @@ Soft-deletes a deck.
 - **Auth**: **Required**
 - **Path Parameter**: `:id` (integer)
 - **Responses**:
-  - `202 Accepted`: `{"message": "Deck deleted"}`
+  - `200 OK`: `{"message": "Deck deleted"}`
+  - `403 Forbidden`: `{"error": "Only the deck owner can delete this deck"}` — including for a System deck, which has no owner and refuses every caller
+  - `404 Not Found`: `{"error": "Deck not found"}`
   - `500 Internal Server Error`: `{"error": "Failed to delete Deck"}`
 
 ---
