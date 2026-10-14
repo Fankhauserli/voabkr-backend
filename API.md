@@ -478,7 +478,7 @@ Creates a new card in a specified deck.
 - **Responses**:
   - `201 Created`: `{"message": "Card created"}`
   - `400 Bad Request`: `{"error": "Invalid request body"}`
-  - `403 Forbidden`: `{"error": "You do not have permission to edit this deck's Cards"}` — the caller is not the deck's owner and holds no edit permission on it
+  - `403 Forbidden`: `{"error": "You do not have permission to edit this deck's Cards"}` — the caller is not the deck's owner and holds no edit permission on it, or the deck is a System deck, which takes no Card write from anyone
   - `404 Not Found`: `{"error": "Deck not found"}`
   - `500 Internal Server Error`: `{"error": "Failed to create Card"}`
 
@@ -525,7 +525,7 @@ Soft-deletes a card.
 - **Path Parameter**: `:id` (integer)
 - **Responses**:
   - `202 Accepted`: `{"message": "Card deleted"}`
-  - `403 Forbidden`: `{"error": "You do not have permission to edit this deck's Cards"}` — the caller is not the deck's owner and holds no edit permission on it
+  - `403 Forbidden`: `{"error": "You do not have permission to edit this deck's Cards"}` — the caller is not the deck's owner and holds no edit permission on it, or the deck is a System deck, which takes no Card write from anyone
   - `404 Not Found`: `{"error": "Card not found"}`
   - `500 Internal Server Error`: `{"error": "Failed to delete Card"}`
 
