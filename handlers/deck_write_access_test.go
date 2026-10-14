@@ -69,20 +69,36 @@ func TestDeleteDeckRefusedToEveryoneButTheOwner(t *testing.T) {
 	}
 }
 
-// A System deck is deleted by no one: it has no owner for anyone to be, so every
-// caller is refused and the Deck stays.
+// A System deck is deleted by no one: it has no owner for anyone to be, so even
+// the strongest standing on it — a share carrying edit — is refused and the Deck
+// stays.
 func TestDeleteSystemDeckRefused(t *testing.T) {
-	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, 0, true)
-
-	w := del(t, h.DeleteDeck, learner, deckRoute, deckPath(deckID))
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected status 403 for a System deck, got %d: %s", w.Code, w.Body.String())
+	tests := []struct {
+		name       string
+		permission string
+	}{
+		{name: "no standing"},
+		{name: "edit holder", permission: access.RoleEdit},
 	}
-	if !deckReadable(t, h, access.Anonymous, deckID) {
-		t.Fatal("expected the refused delete to leave the System deck in place")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler(t)
+			learner := seedUser(t, "learner@example.com")
+			deckID := seedDeck(t, 0, true)
+			if tt.permission != "" {
+				seedShare(t, deckID, learner, tt.permission)
+			}
+
+			w := del(t, h.DeleteDeck, learner, deckRoute, deckPath(deckID))
+
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected status 403 for a System deck, got %d: %s", w.Code, w.Body.String())
+			}
+			if !deckReadable(t, h, access.Anonymous, deckID) {
+				t.Fatal("expected the refused delete to leave the System deck in place")
+			}
+		})
 	}
 }
 
@@ -139,21 +155,36 @@ func TestShareDeckRefusedToEveryoneButTheOwner(t *testing.T) {
 	}
 }
 
-// A System deck is shared by no one, and a refused share grants the invited
-// learner nothing.
+// A System deck is shared by no one, whatever standing the caller holds on it,
+// and a refused share grants the invited learner nothing.
 func TestShareSystemDeckRefused(t *testing.T) {
-	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	invited := seedUser(t, "invited@example.com")
-	deckID := seedDeck(t, 0, false)
-
-	w := post(t, h.ShareDeck, learner, deckShareRoute, deckSharePath(deckID), shareBody("invited@example.com", access.RoleView))
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected status 403 for a System deck, got %d: %s", w.Code, w.Body.String())
+	tests := []struct {
+		name       string
+		permission string
+	}{
+		{name: "no standing"},
+		{name: "edit holder", permission: access.RoleEdit},
 	}
-	if deckReadable(t, h, invited, deckID) {
-		t.Fatal("expected the refused share to grant the invited learner nothing")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler(t)
+			learner := seedUser(t, "learner@example.com")
+			invited := seedUser(t, "invited@example.com")
+			deckID := seedDeck(t, 0, false)
+			if tt.permission != "" {
+				seedShare(t, deckID, learner, tt.permission)
+			}
+
+			w := post(t, h.ShareDeck, learner, deckShareRoute, deckSharePath(deckID), shareBody("invited@example.com", access.RoleView))
+
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected status 403 for a System deck, got %d: %s", w.Code, w.Body.String())
+			}
+			if deckReadable(t, h, invited, deckID) {
+				t.Fatal("expected the refused share to grant the invited learner nothing")
+			}
+		})
 	}
 }
 
@@ -206,22 +237,37 @@ func TestRevokeDeckShareRefusedToEveryoneButTheOwner(t *testing.T) {
 	}
 }
 
-// A System deck's DeckShares are revoked by no one: the holder reads it as
-// before, however the share was come by.
+// A System deck's DeckShares are revoked by no one, whatever standing the caller
+// holds on it: the holder reads it as before.
 func TestRevokeSystemDeckShareRefused(t *testing.T) {
-	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	holder := seedUser(t, "holder@example.com")
-	deckID := seedDeck(t, 0, false)
-	seedShare(t, deckID, holder, access.RoleView)
-
-	w := del(t, h.RevokeDeckShare, learner, deckRevokeRoute, deckRevokePath(deckID, holder))
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected status 403 for a System deck, got %d: %s", w.Code, w.Body.String())
+	tests := []struct {
+		name       string
+		permission string
+	}{
+		{name: "no standing"},
+		{name: "edit holder", permission: access.RoleEdit},
 	}
-	if !deckReadable(t, h, holder, deckID) {
-		t.Fatal("expected the refused revoke to leave the DeckShare in place")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler(t)
+			learner := seedUser(t, "learner@example.com")
+			holder := seedUser(t, "holder@example.com")
+			deckID := seedDeck(t, 0, false)
+			seedShare(t, deckID, holder, access.RoleView)
+			if tt.permission != "" {
+				seedShare(t, deckID, learner, tt.permission)
+			}
+
+			w := del(t, h.RevokeDeckShare, learner, deckRevokeRoute, deckRevokePath(deckID, holder))
+
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected status 403 for a System deck, got %d: %s", w.Code, w.Body.String())
+			}
+			if !deckReadable(t, h, holder, deckID) {
+				t.Fatal("expected the refused revoke to leave the DeckShare in place")
+			}
+		})
 	}
 }
 
