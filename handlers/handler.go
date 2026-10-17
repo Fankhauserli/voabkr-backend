@@ -4,7 +4,9 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/cache"
 	"github.com/Fankhauserli/voabkr-backend/cards"
 	"github.com/Fankhauserli/voabkr-backend/decks"
+	"github.com/Fankhauserli/voabkr-backend/mail"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
+	"github.com/Fankhauserli/voabkr-backend/tokens"
 )
 
 type Handler struct {
@@ -17,13 +19,24 @@ type Handler struct {
 
 	// Cards reads Cards the same way, Review schedules and all.
 	Cards *cards.Reader
+
+	// Mail delivers account messages. It is an interface so a test can observe
+	// the flow with a fake outcome; the real implementation is delivery-only and
+	// reads its configuration once, in NewHandler.
+	Mail mail.Mailer
+
+	// Tokens mints the opaque tokens share links, verification and password
+	// reset carry. No handler reads entropy itself.
+	Tokens *tokens.Issuer
 }
 
 func NewHandler(db *db.Queries, c cache.Cache) *Handler {
 	return &Handler{
-		DB:    db,
-		Cache: c,
-		Decks: decks.NewReader(db, c),
-		Cards: cards.NewReader(db, c),
+		DB:     db,
+		Cache:  c,
+		Decks:  decks.NewReader(db, c),
+		Cards:  cards.NewReader(db, c),
+		Mail:   mail.NewFromEnv(),
+		Tokens: tokens.NewIssuer(),
 	}
 }

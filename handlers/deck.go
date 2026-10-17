@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"log"
 	"net/http"
 	"strconv"
@@ -10,16 +8,11 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
+	"github.com/Fankhauserli/voabkr-backend/tokens"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 )
-
-func generateShareToken() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return "sec_" + hex.EncodeToString(b)
-}
 
 func (h *Handler) GetDecks(c *gin.Context) {
 	caller, signedIn := middleware.Caller(c)
@@ -58,7 +51,12 @@ func (h *Handler) CreateDeck(c *gin.Context) {
 		return
 	}
 
-	shareToken := generateShareToken()
+	shareToken, err := h.Tokens.Mint(tokens.ShareLink)
+	if err != nil {
+		log.Printf("[ERROR] Deck: failed to mint a share token: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to create Deck", err)
+		return
+	}
 
 	newDeck, err := h.DB.CreateDeck(c.Request.Context(), db.CreateDeckParams{
 		Name:       req.Name,
@@ -223,7 +221,12 @@ func (h *Handler) ShareDeck(c *gin.Context) {
 	// Ensure share_token exists
 	shareToken := deck.ShareToken
 	if shareToken == "" {
-		shareToken = generateShareToken()
+		minted, mintErr := h.Tokens.Mint(tokens.ShareLink)
+		if mintErr != nil {
+			respondWithError(c, http.StatusInternalServerError, "Failed to share deck", mintErr)
+			return
+		}
+		shareToken = minted
 		_ = h.DB.SetDeckShareToken(c.Request.Context(), db.SetDeckShareTokenParams{
 			ID:         int64(deck.Id),
 			ShareToken: pgtype.Text{String: shareToken, Valid: true},

@@ -101,7 +101,7 @@ Readiness check.
 ### 3.2 Authentication (`/api/v1`)
 
 #### `POST /api/v1/register`
-Registers a new user account, creates a session, and sends an email verification token if SMTP is configured.
+Registers a new account, creates a session, and attempts to send an email verification token if SMTP is configured. The account and session are kept even when delivery fails or is skipped; resend verification is the recovery path.
 - **Auth**: None
 - **Go Request Struct** (`types.RegisterRequestBody`):
   ```go
@@ -126,7 +126,7 @@ Registers a new user account, creates a session, and sends an email verification
   - `200 OK`: `{"message": "Registered successfully"}` (+ `Set-Cookie: userSession=...`)
   - `400 Bad Request`: `{"error": "Invalid request body"}`
   - `409 Conflict`: `{"error": "User with this email already exists"}`
-  - `500 Internal Server Error`: `{"error": "Failed to create user"}` or `{"error": "Failed to send verification email"}`
+  - `500 Internal Server Error`: `{"error": "Failed to hash password"}`, `{"error": "Failed to create user"}`, `{"error": "Failed to create user settings"}`, or `{"error": "Failed to create session"}`
 
 #### `POST /api/v1/login`
 Authenticates user credentials and starts a Redis-backed session.
@@ -168,7 +168,7 @@ cannot read can still sign out.
   - `500 Internal Server Error`: `{"error": "Failed to terminate session"}`
 
 #### `POST /api/v1/verification/:token`
-Verifies the user's email address using the one-time 64-character token sent by email.
+Verifies the account's email address using the one-time 128-character (64-byte hex) token sent by email.
 - **Auth**: None
 - **URL Parameters**:
   - `:token` (path parameter, string)

@@ -1,20 +1,27 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/helpers"
+	"github.com/Fankhauserli/voabkr-backend/mail"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
+	"github.com/Fankhauserli/voabkr-backend/tokens"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+)
+
+// Lifetimes are one source of truth: the same value bounds the stored token and
+// the validity the email states.
+const (
+	verificationTokenLifetime  = 24 * time.Hour
+	passwordResetTokenLifetime = time.Hour
 )
 
 func respondWithError(c *gin.Context, code int, message string, err error) {
@@ -101,14 +108,12 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	err = helpers.SendVerificationEmail(c, h.DB, int(createdUser.ID), createdUser.Email, createdUser.Name)
-	if err != nil {
-		log.Printf("[ERROR] Register: failed to send verification email for user %d (%s): %v", createdUser.ID, createdUser.Email, err)
-		// Clean up created user to avoid leaving an unusable orphan record
-		_ = h.DB.DeleteVerificationTokensByUserID(c.Request.Context(), createdUser.ID)
-		_ = h.DB.DeleteUser(c.Request.Context(), createdUser.ID)
-		respondWithError(c, http.StatusInternalServerError, "Failed to send verification email", err)
-		return
+	// The account exists once the rows are written. A token or delivery failure
+	// is logged and does not undo it: resend verification is the recovery path.
+	if token, tokenErr := h.issueVerificationToken(c, createdUser); tokenErr != nil {
+		log.Printf("[ERROR] Register: failed to issue a verification token for user %d (%s): %v", createdUser.ID, createdUser.Email, tokenErr)
+	} else if result := h.Mail.SendVerification(createdUser.Email, createdUser.Name, token, verificationTokenLifetime); result.Outcome == mail.Failed {
+		log.Printf("[ERROR] Register: failed to send verification email for user %d (%s): %v", createdUser.ID, createdUser.Email, result.Err)
 	}
 
 	err = middleware.SignIn(c, createdUser.ID)
@@ -146,7 +151,8 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 
 	verification, err := h.DB.GetVerificationToken(c.Request.Context(), token)
 	if err != nil {
-		log.Printf("[WARN] VerifyEmail: invalid or expired token '%s': %v", token, err)
+		// The token itself never reaches a log, in any mode.
+		log.Printf("[WARN] VerifyEmail: invalid or expired verification token: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired token"})
 		return
 	}
@@ -203,14 +209,40 @@ func (h *Handler) ResendVerificationEmail(c *gin.Context) {
 	// Invalidate any existing verification tokens for this user before issuing a fresh one
 	_ = h.DB.DeleteVerificationTokensByUserID(c.Request.Context(), user.ID)
 
-	err = helpers.SendVerificationEmail(c, h.DB, int(user.ID), user.Email, user.Name)
+	token, err := h.issueVerificationToken(c, user)
 	if err != nil {
-		log.Printf("[ERROR] ResendVerificationEmail: failed to send verification email for user %d (%s): %v", user.ID, user.Email, err)
+		log.Printf("[ERROR] ResendVerificationEmail: failed to issue a verification token for user %d (%s): %v", user.ID, user.Email, err)
 		respondWithError(c, http.StatusInternalServerError, "Failed to send verification email", err)
 		return
 	}
 
+	if result := h.Mail.SendVerification(user.Email, user.Name, token, verificationTokenLifetime); result.Outcome == mail.Failed {
+		log.Printf("[ERROR] ResendVerificationEmail: failed to send verification email for user %d (%s): %v", user.ID, user.Email, result.Err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to send verification email", result.Err)
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Verification link sent successfully. Please check your inbox."})
+}
+
+// issueVerificationToken mints a verification token for user and stores it, so
+// the token the mail module is handed is the one that verifies the address.
+func (h *Handler) issueVerificationToken(c *gin.Context, user db.User) (string, error) {
+	token, err := h.Tokens.Mint(tokens.Verification)
+	if err != nil {
+		return "", err
+	}
+
+	_, err = h.DB.CreateVerificationToken(c.Request.Context(), db.CreateVerificationTokenParams{
+		UserID:    user.ID,
+		Token:     token,
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(verificationTokenLifetime), Valid: true},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
 }
 
 func (h *Handler) ForgotPassword(c *gin.Context) {
@@ -224,16 +256,20 @@ func (h *Handler) ForgotPassword(c *gin.Context) {
 	if err == nil && user.ID > 0 {
 		_ = h.DB.DeletePasswordResetTokensByUserID(c.Request.Context(), user.ID)
 
-		b := make([]byte, 24)
-		if _, randErr := rand.Read(b); randErr == nil {
-			token := "sec_rst_" + hex.EncodeToString(b)
-			expiresAt := time.Now().Add(1 * time.Hour)
-			_, _ = h.DB.CreatePasswordResetToken(c.Request.Context(), db.CreatePasswordResetTokenParams{
-				UserID:    user.ID,
-				Token:     token,
-				ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
-			})
+		token, mintErr := h.Tokens.Mint(tokens.PasswordReset)
+		if mintErr != nil {
+			log.Printf("[ERROR] ForgotPassword: failed to mint a reset token for %s: %v", user.Email, mintErr)
+		} else if _, storeErr := h.DB.CreatePasswordResetToken(c.Request.Context(), db.CreatePasswordResetTokenParams{
+			UserID:    user.ID,
+			Token:     token,
+			ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(passwordResetTokenLifetime), Valid: true},
+		}); storeErr != nil {
+			log.Printf("[ERROR] ForgotPassword: failed to store a reset token for %s: %v", user.Email, storeErr)
+		} else {
 			log.Printf("[INFO] ForgotPassword: created password reset token for %s", user.Email)
+			if result := h.Mail.SendPasswordReset(user.Email, user.Name, token, passwordResetTokenLifetime); result.Outcome == mail.Failed {
+				log.Printf("[ERROR] ForgotPassword: failed to send reset email for %s: %v", user.Email, result.Err)
+			}
 		}
 	}
 

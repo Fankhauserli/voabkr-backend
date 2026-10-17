@@ -7,9 +7,9 @@ Thank you for creating an account on voabkr.
 
 Please verify your email address to secure your account, protect your custom decks, and begin your spaced-repetition study journey:
 
-{{ .VerificationURL }}
+{{ .LinkURL }}
 
-(This verification link will expire in {{ .ExpireHours }} hours.)
+(This verification link will expire in {{ .ExpireHours }} hour{{ if ne .ExpireHours 1 }}s{{ end }}.)
 
 ---
 If you did not create an account with voabkr, you can safely ignore this email.
