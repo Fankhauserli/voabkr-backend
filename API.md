@@ -318,17 +318,59 @@ Updates settings for the authenticated user.
 
 Supported deck types are `"vocabulary"` and `"grammar"`.
 
+#### Deck shape
+
+Every Deck object in the deck listing and in `GET /api/v1/decks/:id` carries the same fields. The server emits all of them, using the served spelling — see [ADR-0005](docs/adr/0005-the-served-json-name-is-the-wire-contract.md):
+
+```json
+{
+  "id": 1,
+  "name": "TOPIK I Vocabulary",
+  "type": "vocabulary",
+  "ownerId": 42,
+  "isPublic": true,
+  "shareToken": "sec_7f3c...",
+  "userAccessRole": "owner"
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | number | The Deck's id. |
+| `name` | string | The Deck's name. |
+| `type` | string | `"vocabulary"` or `"grammar"`. |
+| `ownerId` | number | The owner's learner id; `0` for a System deck, which has no owner. |
+| `isPublic` | boolean | Whether the Deck is readable by anyone, signed in or not. |
+| `shareToken` | string | The Deck's share-link token, or `""` when none has been minted. |
+| `userAccessRole` | string | The caller's Access role on the Deck: `owner`, `edit`, `view`, or `public`. |
+
+#### Deck request shape
+
+`POST /api/v1/decks/` and `PUT /api/v1/decks/:id` accept the same body:
+
+```json
+{
+  "name": "TOPIK II Advanced Vocab",
+  "type": "vocabulary",
+  "isPublic": false
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | The Deck's name. |
+| `type` | string | `"vocabulary"` or `"grammar"`. |
+| `isPublic` | boolean | Whether the Deck is public. On `PUT`, only the owner's value is applied: an edit Permission does not include visibility, so an editor's value is ignored. |
+
+The served field names are the contract. The protocol buffer's field name is accepted as an input alias — a body carrying only `is_public` decodes exactly as one carrying `isPublic` — but it is never emitted. A body that spells the same field twice is refused with `400 Bad Request`; a key with no counterpart on the server is discarded. The rule is recorded in [ADR-0005](docs/adr/0005-the-served-json-name-is-the-wire-contract.md).
+
 #### `GET /api/v1/decks/`
-Lists all active decks.
-- **Auth**: **Required**
-- **Go Response Struct** (`[]types.Deck`):
-  ```go
-  type Deck struct {
-      ID   uint   `json:"id"`
-      Name string `json:"name"`
-      Type string `json:"type"` // "vocabulary" | "grammar"
-  }
-  ```
+Lists the Decks the caller may read.
+- **Auth**: Optional
+- **Responses**:
+  - `200 OK`: `[]Deck`. A caller with no session is answered the public Decks, each carrying `"userAccessRole": "public"`; a signed-in learner is answered the public Decks, their own, and the ones shared with them, each carrying the caller's own Access role.
+  - `401 Unauthorized`: `{"error": "Unauthorized"}` — the session names a learner this instance cannot place.
+  - `500 Internal Server Error`: `{"error": "Failed to retrieve decks"}`, or `{"error": "Failed to retrieve public decks"}` for a caller with no session.
 - **Example Request**:
   ```bash
   curl http://localhost:8080/api/v1/decks/ -b cookies.txt
@@ -339,12 +381,11 @@ Lists all active decks.
     {
       "id": 1,
       "name": "TOPIK I Vocabulary",
-      "type": "vocabulary"
-    },
-    {
-      "id": 2,
-      "name": "Basic Verb Endings",
-      "type": "grammar"
+      "type": "vocabulary",
+      "ownerId": 42,
+      "isPublic": true,
+      "shareToken": "sec_7f3c...",
+      "userAccessRole": "public"
     }
   ]
   ```
@@ -352,13 +393,7 @@ Lists all active decks.
 #### `POST /api/v1/decks/`
 Creates a new deck.
 - **Auth**: **Required**
-- **Go Request Struct** (`types.DeckRequest`):
-  ```go
-  type DeckRequest struct {
-      Name string `json:"name"`
-      Type string `json:"type"` // "vocabulary" | "grammar"
-  }
-  ```
+- **Request Body**: the [Deck request shape](#deck-request-shape).
 - **Example Request**:
   ```bash
   curl -X POST http://localhost:8080/api/v1/decks/ \
@@ -366,44 +401,46 @@ Creates a new deck.
     -H "Content-Type: application/json" \
     -d '{
       "name": "TOPIK II Advanced Vocab",
-      "type": "vocabulary"
+      "type": "vocabulary",
+      "isPublic": false
     }'
   ```
 - **Responses**:
-  - `201 Created`: `{"message": "Deck created"}`
-  - `400 Bad Request`: `{"error": "Invalid request body"}`
+  - `201 Created`: `{"message": "Deck created", "data": {"id": 1, "shareToken": "sec_7f3c..."}}`
+  - `400 Bad Request`: `{"error": "Invalid request body"}` — including a body that spells one field twice
+  - `401 Unauthorized`: `{"error": "Unauthorized"}`
   - `500 Internal Server Error`: `{"error": "Failed to create Deck"}`
 
 #### `GET /api/v1/decks/:id`
 Retrieves a single deck by its ID.
-- **Auth**: **Required**
+- **Auth**: Optional
 - **Path Parameter**: `:id` (integer)
-- **Response `200 OK`** (`types.Deck`):
-  ```json
-  {
-    "id": 1,
-    "name": "TOPIK I Vocabulary",
-    "type": "vocabulary"
-  }
-  ```
+- **Responses**:
+  - `200 OK`: the [Deck shape](#deck-shape), carrying the caller's own Access role.
+  - `400 Bad Request`: `{"error": "Invalid deck id parameter"}`
+  - `403 Forbidden`: `{"error": "Access to this private deck is restricted"}` — the Deck is private and the caller may not read it
+  - `404 Not Found`: `{"error": "Deck not found"}`
 
 #### `PUT /api/v1/decks/:id`
 Updates an existing deck.
 - **Auth**: **Required**
 - **Path Parameter**: `:id` (integer)
-- **Go Request Struct** (`types.DeckRequest`):
+- **Request Body**: the [Deck request shape](#deck-request-shape). The body replaces the stored `name` and `type`, so both are expected on every request. `isPublic` is applied only when the caller owns the Deck.
+- **Example Request**:
   ```json
   {
     "name": "TOPIK I Vocabulary (Updated)",
-    "type": "vocabulary"
+    "type": "vocabulary",
+    "isPublic": false
   }
   ```
 - **Responses**:
   - `200 OK`: `{"message": "Deck updated"}`
-  - `400 Bad Request`: `{"error": "Invalid request body"}`
+  - `400 Bad Request`: `{"error": "Invalid request body"}` — including a body that spells one field twice — or `{"error": "Invalid deck id parameter"}`
+  - `401 Unauthorized`: `{"error": "Unauthorized"}`
   - `403 Forbidden`: `{"error": "You do not have permission to edit this deck"}` — the caller is not the deck's owner and holds no edit permission on it, or the deck is a System deck, which is never edited
   - `404 Not Found`: `{"error": "Deck not found"}`
-  - `500 Internal Server Error`: `{"error": "Failed to update Deck"}`
+  - `500 Internal Server Error`: `{"error": "Failed to update deck"}`
 
 #### `DELETE /api/v1/decks/:id`
 Soft-deletes a deck.
@@ -411,9 +448,11 @@ Soft-deletes a deck.
 - **Path Parameter**: `:id` (integer)
 - **Responses**:
   - `200 OK`: `{"message": "Deck deleted"}`
+  - `400 Bad Request`: `{"error": "Invalid deck id parameter"}`
+  - `401 Unauthorized`: `{"error": "Unauthorized"}`
   - `403 Forbidden`: `{"error": "Only the deck owner can delete this deck"}` — including for a System deck, which has no owner and refuses every caller
   - `404 Not Found`: `{"error": "Deck not found"}`
-  - `500 Internal Server Error`: `{"error": "Failed to delete Deck"}`
+  - `500 Internal Server Error`: `{"error": "Failed to delete deck"}`
 
 ---
 
@@ -640,9 +679,9 @@ Fetches cards due for review within a given time window (`next_review_at <= NOW(
 | `PUT` | `/api/v1/user/profile` | **Yes** | `UserRequest` | `{"message":"..."}` |
 | `GET` | `/api/v1/user/settings` | **Yes** | None | `SettingsResponse` |
 | `PUT` | `/api/v1/user/settings` | **Yes** | `SettingsResponse` | `{"message":"..."}` |
-| `GET` | `/api/v1/decks/` | **Yes** | None | `[]Deck` |
-| `POST` | `/api/v1/decks/` | **Yes** | `DeckRequest` | `{"message":"..."}` |
-| `GET` | `/api/v1/decks/:id` | **Yes** | None | `Deck` |
+| `GET` | `/api/v1/decks/` | Optional | None | `[]Deck` |
+| `POST` | `/api/v1/decks/` | **Yes** | `DeckRequest` | `{"message":"...","data":{...}}` |
+| `GET` | `/api/v1/decks/:id` | Optional | None | `Deck` |
 | `PUT` | `/api/v1/decks/:id` | **Yes** | `DeckRequest` | `{"message":"..."}` |
 | `DELETE`| `/api/v1/decks/:id` | **Yes** | None | `{"message":"..."}` |
 | `GET` | `/api/v1/cards/` | **Yes** | None | `[]Card` |
