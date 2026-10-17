@@ -109,7 +109,9 @@ func (r *Reader) StandingOn(ctx context.Context, deckID, caller int64) (Standing
 }
 
 // Public returns every public Deck, as a sessionless caller reads them: the same
-// list for everyone, so an entry answers it.
+// list for everyone, so an entry answers it. The listing query takes its rows and
+// roles from the one readable-Decks rule, with a NULL caller for an anonymous
+// caller.
 func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 	if r.cache != nil {
 		var cached types.DeckList
@@ -118,14 +120,14 @@ func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 		}
 	}
 
-	rows, err := r.db.ListPublicDecks(ctx)
+	rows, err := r.db.ListReadableDecks(ctx, pgtype.Int8{})
 	if err != nil {
 		return nil, err
 	}
 
 	decks := make([]*types.Deck, 0, len(rows))
 	for _, row := range rows {
-		decks = append(decks, bodyOf(row, access.RolePublic))
+		decks = append(decks, bodyOf(listedDeck(row), row.AccessRole))
 	}
 
 	if r.cache != nil {
@@ -141,23 +143,24 @@ func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 // whose Decks and roles change with a DeckShare given or revoked, and a write
 // cannot know whose listing to clear (ADR-0001).
 func (r *Reader) ForCaller(ctx context.Context, caller int64) ([]*types.Deck, error) {
-	rows, err := r.db.ListDecksForUser(ctx, pgtype.Int8{Int64: caller, Valid: true})
+	rows, err := r.db.ListReadableDecks(ctx, pgtype.Int8{Int64: caller, Valid: true})
 	if err != nil {
 		return nil, err
 	}
 
 	// The query resolves each Deck's Access role for this caller, so the rows
-	// carry it; ListPublicDecks rows are read by a guest, which is the public role.
+	// carry it; an anonymous caller's rows carry the public role for the same
+	// reason.
 	decks := make([]*types.Deck, 0, len(rows))
 	for _, row := range rows {
-		decks = append(decks, bodyOf(listedDeck(row), row.UserAccessRole))
+		decks = append(decks, bodyOf(listedDeck(row), row.AccessRole))
 	}
 	return decks, nil
 }
 
 // listedDeck is a listing row as the Deck it carries: the query reads the Deck's
 // own columns with the role resolved for this caller beside them.
-func listedDeck(row db.ListDecksForUserRow) db.Deck {
+func listedDeck(row db.ListReadableDecksRow) db.Deck {
 	return db.Deck{
 		ID:         row.ID,
 		Name:       row.Name,

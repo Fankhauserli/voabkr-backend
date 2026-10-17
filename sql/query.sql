@@ -141,38 +141,27 @@ SELECT COUNT(*) FROM user_cards
 WHERE user_id = $1 AND next_review_at <= NOW();
 
 -- name: GetCardsDueForReviewAfter :many
+-- The queue selects from the readable-Decks rule, so a Deck the caller may no
+-- longer read — deleted included — takes its Cards out of the queue.
 SELECT c.* FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks(sqlc.arg(user_id)::bigint) d ON d.id = c.deck_id
 WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
-    WHERE uc.user_id = $1 AND uc.next_review_at <= NOW() AND uc.next_review_at > $2
+    WHERE uc.user_id = sqlc.arg(user_id)
+      AND uc.next_review_at <= NOW()
+      AND uc.next_review_at > sqlc.arg(next_review_at)
   )
-  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = $1
-    )
-  );
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL);
 
 -- name: GetCardsDueForReview :many
+-- The due queue selects from the same rule as every other Deck-scoped read.
 SELECT c.* FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks(sqlc.arg(user_id)::bigint) d ON d.id = c.deck_id
 WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
-    WHERE uc.user_id = $1 AND uc.next_review_at <= NOW()
+    WHERE uc.user_id = sqlc.arg(user_id) AND uc.next_review_at <= NOW()
   )
-  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = $1
-    )
-  );
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL);
 
 -- name: ListUserCardSchedules :many
 -- The caller's own Review schedules for a set of Cards, so a Card response can
@@ -223,44 +212,34 @@ WHERE id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
 LIMIT 1;
 
 -- name: ListAccessibleCards :many
+-- The cross-Deck listing selects from the readable-Decks rule, so a deleted Deck
+-- takes its Cards with it and no query re-spells public / owner / shared.
 SELECT c.* FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks(sqlc.narg(user_id)::bigint) d ON d.id = c.deck_id
 WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = sqlc.arg(user_id)
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = sqlc.arg(user_id)
-    )
-  )
 ORDER BY c.id ASC;
 
 -- name: ListAccessibleCardsPaged :many
 SELECT c.* FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks(sqlc.narg(user_id)::bigint) d ON d.id = c.deck_id
 WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = sqlc.arg(user_id)
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = sqlc.arg(user_id)
-    )
-  )
 ORDER BY c.id ASC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: ListCardsByDeck :many
-SELECT * FROM cards
-WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
-ORDER BY id ASC
+-- A Deck-scoped listing is a single-Deck read, so it applies the same liveness
+-- rule as GetDeck: a deleted Deck has no Cards to list.
+SELECT c.* FROM cards c
+JOIN decks d ON d.id = c.deck_id AND d.deleted_at IS NULL
+WHERE c.deck_id = $1 AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+ORDER BY c.id ASC
 LIMIT $2 OFFSET $3;
 
 -- name: ListCardsByDeckAll :many
-SELECT * FROM cards
-WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
-ORDER BY id ASC;
+SELECT c.* FROM cards c
+JOIN decks d ON d.id = c.deck_id AND d.deleted_at IS NULL
+WHERE c.deck_id = $1 AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+ORDER BY c.id ASC;
 
 -- name: CreateCard :one
 INSERT INTO cards (
@@ -295,25 +274,14 @@ SELECT * FROM decks
 WHERE deleted_at IS NULL
 ORDER BY name;
 
--- name: ListPublicDecks :many
-SELECT * FROM decks
-WHERE is_public = TRUE AND deleted_at IS NULL
-ORDER BY name;
-
--- name: ListDecksForUser :many
-SELECT DISTINCT d.id, d.name, d.type, d.owner_id, d.is_public, d.share_token, d.created_at, d.updated_at, d.deleted_at,
-  CASE
-    WHEN d.owner_id = $1 THEN 'owner'
-    WHEN s.permission IS NOT NULL THEN s.permission
-    ELSE 'public'
-  END AS user_access_role
+-- name: ListReadableDecks :many
+-- The Deck listing and every Deck-scoped read take their rows and roles from the
+-- one readable-Decks rule. A NULL caller is anonymous. The join to decks is what
+-- gives sqlc the row's column types; readable_decks decides which rows join and
+-- the role they carry.
+SELECT d.*, r.access_role::text AS access_role
 FROM decks d
-LEFT JOIN deck_shares s ON d.id = s.deck_id AND s.user_id = $1
-WHERE d.deleted_at IS NULL AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR s.user_id = $1
-)
+JOIN readable_decks(sqlc.narg(caller)::bigint) r ON r.id = d.id
 ORDER BY d.name;
 
 -- name: CreateDeck :one
