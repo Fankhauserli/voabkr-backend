@@ -1,6 +1,13 @@
 // Package access answers what standing a learner holds on a Deck, and what that
 // standing permits. It is pure: callers fetch the Deck and the caller's
 // DeckShare and ask, rather than branching on a role themselves.
+//
+// This is the row-shaped adapter for one Deck. The set-shaped twin — every live
+// Deck a caller may read, with the same Access role — is the readable_decks SQL
+// function in migration 00005, which the listings and queues select from; the
+// function also carries the liveness rule these predicates leave to the read
+// that fetched the Deck. A database-backed contract test keeps the two in
+// agreement.
 package access
 
 import (

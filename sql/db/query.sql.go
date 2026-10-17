@@ -453,22 +453,15 @@ func (q *Queries) GetCard(ctx context.Context, id int64) (Card, error) {
 
 const getCardsDueForReview = `-- name: GetCardsDueForReview :many
 SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks($1::bigint) d ON d.id = c.deck_id
 WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
     WHERE uc.user_id = $1 AND uc.next_review_at <= NOW()
   )
   AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = $1
-    )
-  )
 `
 
+// The due queue selects from the same rule as every other Deck-scoped read.
 func (q *Queries) GetCardsDueForReview(ctx context.Context, userID int64) ([]Card, error) {
 	rows, err := q.db.Query(ctx, getCardsDueForReview, userID)
 	if err != nil {
@@ -501,20 +494,14 @@ func (q *Queries) GetCardsDueForReview(ctx context.Context, userID int64) ([]Car
 
 const getCardsDueForReviewAfter = `-- name: GetCardsDueForReviewAfter :many
 SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks($1::bigint) d ON d.id = c.deck_id
 WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
-    WHERE uc.user_id = $1 AND uc.next_review_at <= NOW() AND uc.next_review_at > $2
+    WHERE uc.user_id = $1
+      AND uc.next_review_at <= NOW()
+      AND uc.next_review_at > $2
   )
   AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = $1
-    )
-  )
 `
 
 type GetCardsDueForReviewAfterParams struct {
@@ -522,6 +509,8 @@ type GetCardsDueForReviewAfterParams struct {
 	NextReviewAt pgtype.Timestamptz
 }
 
+// The queue selects from the readable-Decks rule, so a Deck the caller may no
+// longer read — deleted included — takes its Cards out of the queue.
 func (q *Queries) GetCardsDueForReviewAfter(ctx context.Context, arg GetCardsDueForReviewAfterParams) ([]Card, error) {
 	rows, err := q.db.Query(ctx, getCardsDueForReviewAfter, arg.UserID, arg.NextReviewAt)
 	if err != nil {
@@ -857,19 +846,13 @@ func (q *Queries) HardDeleteUser(ctx context.Context, id int64) error {
 
 const listAccessibleCards = `-- name: ListAccessibleCards :many
 SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks($1::bigint) d ON d.id = c.deck_id
 WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = $1
-    )
-  )
 ORDER BY c.id ASC
 `
 
+// The cross-Deck listing selects from the readable-Decks rule, so a deleted Deck
+// takes its Cards with it and no query re-spells public / owner / shared.
 func (q *Queries) ListAccessibleCards(ctx context.Context, userID pgtype.Int8) ([]Card, error) {
 	rows, err := q.db.Query(ctx, listAccessibleCards, userID)
 	if err != nil {
@@ -902,16 +885,8 @@ func (q *Queries) ListAccessibleCards(ctx context.Context, userID pgtype.Int8) (
 
 const listAccessibleCardsPaged = `-- name: ListAccessibleCardsPaged :many
 SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
-JOIN decks d ON d.id = c.deck_id
+JOIN readable_decks($1::bigint) d ON d.id = c.deck_id
 WHERE (c.deleted_at > NOW() OR c.deleted_at IS NULL)
-  AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR EXISTS (
-      SELECT 1 FROM deck_shares s
-      WHERE s.deck_id = d.id AND s.user_id = $1
-    )
-  )
 ORDER BY c.id ASC
 LIMIT $3 OFFSET $2
 `
@@ -953,9 +928,10 @@ func (q *Queries) ListAccessibleCardsPaged(ctx context.Context, arg ListAccessib
 }
 
 const listCardsByDeck = `-- name: ListCardsByDeck :many
-SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
-WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
-ORDER BY id ASC
+SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
+JOIN decks d ON d.id = c.deck_id AND d.deleted_at IS NULL
+WHERE c.deck_id = $1 AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+ORDER BY c.id ASC
 LIMIT $2 OFFSET $3
 `
 
@@ -965,6 +941,8 @@ type ListCardsByDeckParams struct {
 	Offset int32
 }
 
+// A Deck-scoped listing is a single-Deck read, so it applies the same liveness
+// rule as GetDeck: a deleted Deck has no Cards to list.
 func (q *Queries) ListCardsByDeck(ctx context.Context, arg ListCardsByDeckParams) ([]Card, error) {
 	rows, err := q.db.Query(ctx, listCardsByDeck, arg.DeckID, arg.Limit, arg.Offset)
 	if err != nil {
@@ -996,9 +974,10 @@ func (q *Queries) ListCardsByDeck(ctx context.Context, arg ListCardsByDeckParams
 }
 
 const listCardsByDeckAll = `-- name: ListCardsByDeckAll :many
-SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
-WHERE deck_id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
-ORDER BY id ASC
+SELECT c.id, c.deck_id, c.korean_word, c.english_word, c.context, c.example_sentence, c.created_at, c.updated_at, c.deleted_at FROM cards c
+JOIN decks d ON d.id = c.deck_id AND d.deleted_at IS NULL
+WHERE c.deck_id = $1 AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+ORDER BY c.id ASC
 `
 
 func (q *Queries) ListCardsByDeckAll(ctx context.Context, deckID int64) ([]Card, error) {
@@ -1101,82 +1080,39 @@ func (q *Queries) ListDecks(ctx context.Context) ([]Deck, error) {
 	return items, nil
 }
 
-const listDecksForUser = `-- name: ListDecksForUser :many
-SELECT DISTINCT d.id, d.name, d.type, d.owner_id, d.is_public, d.share_token, d.created_at, d.updated_at, d.deleted_at,
-  CASE
-    WHEN d.owner_id = $1 THEN 'owner'
-    WHEN s.permission IS NOT NULL THEN s.permission
-    ELSE 'public'
-  END AS user_access_role
+const listReadableDecks = `-- name: ListReadableDecks :many
+SELECT d.id, d.name, d.type, d.created_at, d.updated_at, d.deleted_at, d.owner_id, d.is_public, d.share_token, r.access_role::text AS access_role
 FROM decks d
-LEFT JOIN deck_shares s ON d.id = s.deck_id AND s.user_id = $1
-WHERE d.deleted_at IS NULL AND (
-    d.is_public = TRUE
-    OR d.owner_id = $1
-    OR s.user_id = $1
-)
+JOIN readable_decks($1::bigint) r ON r.id = d.id
 ORDER BY d.name
 `
 
-type ListDecksForUserRow struct {
-	ID             int64
-	Name           string
-	Type           DeckType
-	OwnerID        pgtype.Int8
-	IsPublic       bool
-	ShareToken     pgtype.Text
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
-	DeletedAt      pgtype.Timestamptz
-	UserAccessRole string
+type ListReadableDecksRow struct {
+	ID         int64
+	Name       string
+	Type       DeckType
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+	DeletedAt  pgtype.Timestamptz
+	OwnerID    pgtype.Int8
+	IsPublic   bool
+	ShareToken pgtype.Text
+	AccessRole string
 }
 
-func (q *Queries) ListDecksForUser(ctx context.Context, ownerID pgtype.Int8) ([]ListDecksForUserRow, error) {
-	rows, err := q.db.Query(ctx, listDecksForUser, ownerID)
+// The Deck listing and every Deck-scoped read take their rows and roles from the
+// one readable-Decks rule. A NULL caller is anonymous. The join to decks is what
+// gives sqlc the row's column types; readable_decks decides which rows join and
+// the role they carry.
+func (q *Queries) ListReadableDecks(ctx context.Context, caller pgtype.Int8) ([]ListReadableDecksRow, error) {
+	rows, err := q.db.Query(ctx, listReadableDecks, caller)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDecksForUserRow
+	var items []ListReadableDecksRow
 	for rows.Next() {
-		var i ListDecksForUserRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Type,
-			&i.OwnerID,
-			&i.IsPublic,
-			&i.ShareToken,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.UserAccessRole,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPublicDecks = `-- name: ListPublicDecks :many
-SELECT id, name, type, created_at, updated_at, deleted_at, owner_id, is_public, share_token FROM decks
-WHERE is_public = TRUE AND deleted_at IS NULL
-ORDER BY name
-`
-
-func (q *Queries) ListPublicDecks(ctx context.Context) ([]Deck, error) {
-	rows, err := q.db.Query(ctx, listPublicDecks)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Deck
-	for rows.Next() {
-		var i Deck
+		var i ListReadableDecksRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -1187,6 +1123,7 @@ func (q *Queries) ListPublicDecks(ctx context.Context) ([]Deck, error) {
 			&i.OwnerID,
 			&i.IsPublic,
 			&i.ShareToken,
+			&i.AccessRole,
 		); err != nil {
 			return nil, err
 		}

@@ -104,6 +104,55 @@ func TestGetSharedDeckByTokenAfterTheDeckIsDeleted(t *testing.T) {
 	}
 }
 
+// The listing carries the Access role the caller reads each Deck under, resolved
+// by the same readable-Decks rule the Card and Review reads select from.
+func TestGetDecksListingCarriesTheCallersRole(t *testing.T) {
+	h := newTestHandler(t)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	viewer := dbtest.SeedUser(t, "viewer@example.com")
+	editor := dbtest.SeedUser(t, "editor@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	publicDeck := dbtest.SeedDeck(t, owner, true)
+	dbtest.SeedShare(t, deckID, viewer, access.RoleView)
+	dbtest.SeedShare(t, deckID, editor, access.RoleEdit)
+
+	tests := []struct {
+		name   string
+		caller int64
+		deck   int64
+		want   string
+	}{
+		{name: "the owner reads owner", caller: owner, deck: deckID, want: access.RoleOwner},
+		{name: "a view holder reads view", caller: viewer, deck: deckID, want: access.RoleView},
+		{name: "an edit holder reads edit", caller: editor, deck: deckID, want: access.RoleEdit},
+		{name: "a guest reads public", caller: access.Anonymous, deck: publicDeck, want: access.RolePublic},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := get(t, h.GetDecks, tt.caller, decksRoute, decksRoute)
+			if w.Code != http.StatusOK {
+				t.Fatalf("failed to read the listing: %d: %s", w.Code, w.Body.String())
+			}
+
+			var decks []types.Deck
+			if err := json.Unmarshal(w.Body.Bytes(), &decks); err != nil {
+				t.Fatalf("failed to parse the listing: %v", err)
+			}
+
+			for i := range decks {
+				if int64(decks[i].Id) == tt.deck {
+					if decks[i].UserAccessRole != tt.want {
+						t.Fatalf("expected role %q, got %q", tt.want, decks[i].UserAccessRole)
+					}
+					return
+				}
+			}
+			t.Fatalf("expected Deck %d in the listing, got %v", tt.deck, decks)
+		})
+	}
+}
+
 // A revoked DeckShare leaves the holder's listing on their next request, not at
 // the entry's expiry.
 func TestGetDecksAfterADeckShareIsRevoked(t *testing.T) {

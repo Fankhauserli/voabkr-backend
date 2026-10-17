@@ -138,6 +138,81 @@ func TestGetReviewsAfterTheCardIsDeleted(t *testing.T) {
 	}
 }
 
+// Deleting a Deck takes its Cards out of the cross-Deck listing: the listing
+// applies the same liveness rule as a single-Deck read.
+func TestGetCardsListingDropsCardsOfDeletedDeck(t *testing.T) {
+	h := newTestHandler(t)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, deckID, "지운", "deleted")
+
+	if got := listedWords(t, h, owner, cardsRoute); !slices.Equal(got, []string{"지운"}) {
+		t.Fatalf("expected the Deck's Card in the listing to begin with, got %v", got)
+	}
+
+	if w := del(t, h.DeleteDeck, owner, deckRoute, deckPath(deckID)); w.Code != http.StatusOK {
+		t.Fatalf("failed to delete the Deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	if got := listedWords(t, h, owner, cardsRoute); len(got) != 0 {
+		t.Fatalf("expected the deleted Deck's Card to leave the listing, got %v", got)
+	}
+}
+
+// The Review queue applies the same liveness rule: deleting a Deck takes its
+// Cards out of the queue even though the Reviews themselves remain.
+func TestGetReviewsQueueDropsCardsOfDeletedDeck(t *testing.T) {
+	h := newTestHandler(t)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "지운", "deleted")
+	dbtest.SeedDueReview(t, learner, cardID)
+
+	if got := cardWords(t, get(t, h.GetReviews, learner, reviewsRoute, reviewsRoute).Body.Bytes()); !slices.Equal(got, []string{"지운"}) {
+		t.Fatalf("expected the due Card in the queue to begin with, got %v", got)
+	}
+
+	if w := del(t, h.DeleteDeck, learner, deckRoute, deckPath(deckID)); w.Code != http.StatusOK {
+		t.Fatalf("failed to delete the Deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	w := get(t, h.GetReviews, learner, reviewsRoute, reviewsRoute)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := cardWords(t, w.Body.Bytes()); len(got) != 0 {
+		t.Fatalf("expected the deleted Deck's Card to leave the queue, got %v", got)
+	}
+}
+
+// The since listing selects from the same rule, so a deleted Deck leaves it too.
+func TestGetReviewsSinceDropsCardsOfDeletedDeck(t *testing.T) {
+	h := newTestHandler(t)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "지운", "deleted")
+	dbtest.SeedDueReview(t, learner, cardID)
+
+	since := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	path := fmt.Sprintf("/api/v1/reviews/since/%s", since)
+
+	if got := cardWords(t, get(t, h.GetReviewsSince, learner, "/api/v1/reviews/since/:time", path).Body.Bytes()); !slices.Equal(got, []string{"지운"}) {
+		t.Fatalf("expected the due Card in the listing to begin with, got %v", got)
+	}
+
+	if w := del(t, h.DeleteDeck, learner, deckRoute, deckPath(deckID)); w.Code != http.StatusOK {
+		t.Fatalf("failed to delete the Deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	w := get(t, h.GetReviewsSince, learner, "/api/v1/reviews/since/:time", path)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := cardWords(t, w.Body.Bytes()); len(got) != 0 {
+		t.Fatalf("expected the deleted Deck's Card to leave the listing, got %v", got)
+	}
+}
+
 // The since listing reads a deleted Card as gone for the same reason.
 func TestGetReviewsSinceAfterTheCardIsDeleted(t *testing.T) {
 	h := newTestHandler(t)
