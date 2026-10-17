@@ -38,7 +38,6 @@ func TestPrivateRoutesRefuseAnonymousCallers(t *testing.T) {
 		{name: "edit review", method: http.MethodPut, path: "/api/v1/reviews/1"},
 		{name: "reviews since", method: http.MethodGet, path: "/api/v1/reviews/since/2026-01-01T00:00:00Z"},
 		{name: "grades", method: http.MethodPost, path: "/api/v1/reviews/batch"},
-		{name: "logout", method: http.MethodPost, path: "/api/v1/logout"},
 		{name: "create card", method: http.MethodPost, path: "/api/v1/cards/"},
 		{name: "edit card", method: http.MethodPut, path: "/api/v1/cards/1"},
 		{name: "delete card", method: http.MethodDelete, path: "/api/v1/cards/1"},
