@@ -2,6 +2,7 @@ package types_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Fankhauserli/voabkr-backend/types"
@@ -128,6 +129,39 @@ func TestDeckJSON(t *testing.T) {
 	if deckReq.GetName() != "Basic Grammar" || deckReq.GetType() != "grammar" {
 		t.Fatalf("unexpected DeckRequest: %+v", deckReq)
 	}
+}
+
+func TestDeckRequestSpelling(t *testing.T) {
+	t.Run("the served spelling decodes", func(t *testing.T) {
+		var req types.DeckRequest
+		if err := json.Unmarshal([]byte(`{"name":"TOPIK","type":"vocabulary","isPublic":true}`), &req); err != nil {
+			t.Fatalf("failed to unmarshal DeckRequest: %v", err)
+		}
+		if !req.GetIsPublic() {
+			t.Fatalf("expected isPublic to decode to true, got %+v", &req)
+		}
+	})
+
+	t.Run("the buffer's field name is an accepted alias", func(t *testing.T) {
+		var req types.DeckRequest
+		if err := json.Unmarshal([]byte(`{"name":"TOPIK","type":"vocabulary","is_public":true}`), &req); err != nil {
+			t.Fatalf("failed to unmarshal DeckRequest: %v", err)
+		}
+		if !req.GetIsPublic() {
+			t.Fatalf("expected is_public to decode to isPublic, got %+v", &req)
+		}
+	})
+
+	t.Run("a body carrying both spellings is refused", func(t *testing.T) {
+		var req types.DeckRequest
+		err := json.Unmarshal([]byte(`{"isPublic":true,"is_public":true}`), &req)
+		if err == nil {
+			t.Fatalf("expected a doubly-spelled body to be refused, got %+v", &req)
+		}
+		if !strings.Contains(err.Error(), "duplicate field") {
+			t.Fatalf("expected the refusal to name the duplicate field, got %v", err)
+		}
+	})
 }
 
 func TestReviewJSON(t *testing.T) {
