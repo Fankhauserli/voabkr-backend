@@ -8,9 +8,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/cards"
+	"github.com/Fankhauserli/voabkr-backend/scheduling"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -260,116 +263,74 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 		return
 	}
 
-	// determine the next review date based on the ease value and the efactor like sm2 algorithm
+	// An out-of-range ease is not a Grade this route can schedule; it used to
+	// fall through to a default schedule and be recorded as an answer.
+	grade, isGrade := scheduling.ParseGrade(req.Ease)
+	if !isGrade {
+		respondWithError(c, http.StatusBadRequest, "Invalid request body", nil)
+		return
+	}
 
-	// get current efactor and interval for the card
-	card, err := h.DB.GetUserCard(c.Request.Context(), db.GetUserCardParams{
+	// The Card's Deck decides who may study it, so the Card is read before any
+	// Review is touched: a Grade on a Deck the caller cannot read is refused, and
+	// creates nothing.
+	card, err := h.Cards.ByID(c.Request.Context(), intUserID, intId)
+	switch {
+	case errors.Is(err, cards.ErrNoSuchCard):
+		respondWithError(c, http.StatusNotFound, "Card not found", err)
+		return
+	case errors.Is(err, cards.ErrSchedules):
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedule", err)
+		return
+	case err != nil:
+		log.Printf("[WARN] Review: failed to get Card: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to get card", err)
+		return
+	}
+
+	if _, ok := h.requireReadableDeck(c, card.DeckID, intUserID); !ok {
+		return
+	}
+
+	// The stored Review is the state scheduling continues from. Only a Review
+	// that is not there is created; any other read failure fails the request,
+	// since starting a fresh schedule would hide the database's answer.
+	review, err := h.DB.GetUserCard(c.Request.Context(), db.GetUserCardParams{
 		UserID: intUserID,
 		CardID: intId,
 	})
-	if err != nil {
-		card, err = h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		review, err = h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
 			UserID: intUserID,
 			CardID: intId,
 		})
 		if err != nil {
-			log.Printf("[WARN] Review: failed to get or initialize UserCard: %v", err)
+			log.Printf("[WARN] Review: failed to initialize UserCard: %v", err)
 			respondWithError(c, http.StatusInternalServerError, "Failed to get UserCard", err)
 			return
 		}
-	}
-
-	// ── Anki-style 4-button SM-2 scheduling ──────────────────────────────────
-	//
-	// Button mapping (sent as ease 1–4):
-	//   1 = Again  → relearning step: 1 min
-	//   2 = Hard   → relearning step: 6 min  (or 1.2× current if graduated)
-	//   3 = Good   → next graduated interval (or 10 min on first success)
-	//   4 = Easy   → skip relearning, jump to 4-day minimum
-	//
-	// The backend stores next_review_at as a timestamp, so we set it relative
-	// to NOW() (not relative to the previous next_review_at, which Anki used
-	// for days but which breaks for sub-day steps).
-	//
-	// interval column (INT, days) is used only for graduated cards.
-	// For relearning cards the interval stays 0 so we can detect them.
-
-	// Update E-Factor for rated ease (Anki applies EF change on every answer).
-	// Anki formula: EF' = EF + (0.1 - (3-q)*(0.08 + (3-q)*0.02))  (q in 0-4)
-	// We remap our 1-4 to Anki's 0-4 scale: ankiQ = ease - 1
-	ankiQ := req.Ease - 1 // 0=Again, 1=Hard, 2=Good, 3=Easy
-	newEfactor := card.Efactor + (0.1 - float64(3-ankiQ)*(0.08+float64(3-ankiQ)*0.02))
-	if newEfactor < 1.3 {
-		newEfactor = 1.3
+	case err != nil:
+		log.Printf("[WARN] Review: failed to get UserCard: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to get UserCard", err)
+		return
 	}
 
 	now := time.Now()
-	var nextReviewAt time.Time
-	var newInterval int32
-
-	switch req.Ease {
-	case 1: // Again – relearning: 1 minute
-		newInterval = 0 // stays in relearning
-		nextReviewAt = now.Add(1 * time.Minute)
-
-	case 2: // Hard
-		if card.Interval == 0 {
-			// Relearning: 6-minute step
-			newInterval = 0
-			nextReviewAt = now.Add(6 * time.Minute)
-		} else {
-			// Graduated: 1.2× current interval (Anki Hard multiplier), min 1 day
-			newInterval = int32(float64(card.Interval) * 1.2)
-			if newInterval < 1 {
-				newInterval = 1
-			}
-			nextReviewAt = now.AddDate(0, 0, int(newInterval))
-		}
-
-	case 3: // Good
-		if card.Interval == 0 {
-			// First successful recall from relearning: 10-minute step, then graduate
-			newInterval = 0
-			nextReviewAt = now.Add(10 * time.Minute)
-		} else if card.Interval == 1 {
-			// First graduation: 6 days (Anki default)
-			newInterval = 6
-			nextReviewAt = now.AddDate(0, 0, 6)
-		} else {
-			// Graduated: interval × EF
-			newInterval = int32(float64(card.Interval) * newEfactor)
-			if newInterval <= card.Interval {
-				newInterval = card.Interval + 1 // always make progress
-			}
-			nextReviewAt = now.AddDate(0, 0, int(newInterval))
-		}
-
-	case 4: // Easy – skip relearning, jump to at least 4 days
-		if card.Interval < 4 {
-			newInterval = 4
-		} else {
-			// Graduated + Easy multiplier (Anki uses EF × 1.3 for Easy)
-			newInterval = int32(float64(card.Interval) * newEfactor * 1.3)
-		}
-		if newInterval < 4 {
-			newInterval = 4
-		}
-		nextReviewAt = now.AddDate(0, 0, int(newInterval))
-
-	default:
-		// Fallback: treat as Good
-		newInterval = card.Interval + 1
-		nextReviewAt = now.AddDate(0, 0, int(newInterval))
-	}
+	next := scheduling.Next(scheduling.State{
+		Interval:    review.Interval,
+		Efactor:     review.Efactor,
+		Repetitions: review.Repetitions,
+	}, grade, now)
 
 	err = h.DB.UpdateUserCard(c.Request.Context(), db.UpdateUserCardParams{
 		UserID:         intUserID,
 		CardID:         intId,
-		Efactor:        newEfactor,
-		Interval:       newInterval,
-		Repetitions:    card.Repetitions + 1,
+		Efactor:        next.Efactor,
+		Interval:       next.Interval,
+		Repetitions:    next.Repetitions,
 		LastReviewedAt: pgtype.Timestamptz{Time: now, Valid: true},
-		NextReviewAt:   pgtype.Timestamptz{Time: nextReviewAt, Valid: true},
+		NextReviewAt:   pgtype.Timestamptz{Time: next.NextReviewAt, Valid: true},
 	})
 	if err != nil {
 		log.Printf("[WARN] Review: failed to update UserCard: %v", err)

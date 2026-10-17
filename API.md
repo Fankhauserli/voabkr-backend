@@ -628,22 +628,20 @@ Retrieves all cards currently due for review (`next_review_at <= NOW()`) for the
   ```
 
 #### `PUT /api/v1/reviews/:id`
-Submits a rating score (0–5) after reviewing a card. The server recalculates the SM-2 ease factor (`EF`), repetition interval, and schedules the `next_review_at` date.
+Submits a Grade (1–4) after reviewing a card. The server recalculates the Review schedule's Efactor and Interval, and schedules the `next_review_at` date.
 - **Auth**: **Required**
 - **Path Parameter**: `:id` (Card ID, integer)
 - **Go Request Struct** (`types.ReviewRequest`):
   ```go
   type ReviewRequest struct {
-      Ease int `json:"ease"` // Score 0 through 5
+      Ease int `json:"ease"` // Grade: 1 Again, 2 Hard, 3 Good, 4 Easy
   }
   ```
-- **SM-2 Ease Scale**:
-  - `0`: Complete blackout / forgotten
-  - `1`: Incorrect response; correct answer remembered upon seeing it
-  - `2`: Incorrect response; seemed easy to recall
-  - `3`: Correct response, but with serious difficulty
-  - `4`: Correct response after hesitation
-  - `5`: Perfect response / instant recall
+- **Grade Scale**:
+  - `1`: Again — forgotten; relearns in a minute
+  - `2`: Hard — recalled with difficulty; relearns in six minutes
+  - `3`: Good — recalled correctly; graduates to six days
+  - `4`: Easy — effortless recall; at least four days
 - **Example Request**:
   ```bash
   curl -X PUT http://localhost:8080/api/v1/reviews/1 \
@@ -655,8 +653,10 @@ Submits a rating score (0–5) after reviewing a card. The server recalculates t
   ```
 - **Responses**:
   - `200 OK`: `{"message": "Review updated"}`
-  - `400 Bad Request`: `{"error": "Invalid request body"}`
-  - `500 Internal Server Error`: `{"error": "Failed to update UserCard"}`
+  - `400 Bad Request`: `{"error": "Invalid request body"}` — the body is not a Grade, or `ease` is outside 1–4
+  - `403 Forbidden`: `{"error": "Access to this private deck is restricted"}` — the caller may not read the Deck holding the Card
+  - `404 Not Found`: `{"error": "Card not found"}` — no such Card, or one deleted
+  - `500 Internal Server Error`: `{"error": "Failed to get card"}`, `{"error": "Failed to read the Review schedule"}`, `{"error": "Failed to get UserCard"}`, or `{"error": "Failed to update UserCard"}`
 
 #### `GET /api/v1/reviews/since/:time`
 Fetches cards due for review within a given time window (`next_review_at <= NOW() AND next_review_at > time`).
@@ -707,6 +707,6 @@ Fetches cards due for review within a given time window (`next_review_at <= NOW(
    - User IDs are stored as strings in Redis sessions (`fmt.Sprint(user.ID)`).
    - Protected handlers parse this back into an integer using `strconv.ParseInt(userID.(string), 10, 64)` to interact with the database queries.
 2. **Review Scheduling (SM-2)**:
-   - When a review score (`ease`) is submitted to `PUT /api/v1/reviews/:id`, the card's `efactor`, `interval`, and `next_review_at` timestamps are dynamically calculated based on the SuperMemo SM-2 algorithm.
+   - When a Grade (`ease`) is submitted to `PUT /api/v1/reviews/:id`, the card's `efactor`, `interval`, and `next_review_at` timestamps are dynamically calculated based on the SuperMemo SM-2 algorithm.
    - The minimum E-factor is clamped at `1.3`.
    - New intervals advance from 1 day (first interval), to 6 days (second repetition), and subsequently scaled by `newInterval = int32(float64(interval) * newEfactor)`.
