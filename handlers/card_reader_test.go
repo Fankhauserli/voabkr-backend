@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"testing"
@@ -42,6 +43,27 @@ func TestGetCardsAfterCreatingACard(t *testing.T) {
 
 	if words := deckCardWords(t, h, owner, deckID); !slices.Equal(words, []string{"나무"}) {
 		t.Fatalf("expected the created Card in the listing, got %v", words)
+	}
+}
+
+// Editing a Card in place leaves the entry the Deck's listing answers from.
+func TestGetCardsAfterUpdatingACard(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	deckID := seedDeck(t, owner, false)
+	cardID := seedCard(t, deckID, "나무", "tree")
+
+	if words := deckCardWords(t, h, owner, deckID); !slices.Equal(words, []string{"나무"}) {
+		t.Fatalf("expected the seeded Card to begin with, got %v", words)
+	}
+
+	w := put(t, h.UpdateCard, owner, cardRoute, cardPath(cardID), cardWriteBody(deckID, "숲", "forest"))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("failed to update the Card: %d: %s", w.Code, w.Body.String())
+	}
+
+	if words := deckCardWords(t, h, owner, deckID); !slices.Equal(words, []string{"숲"}) {
+		t.Fatalf("expected the edited Card in the listing, got %v", words)
 	}
 }
 
@@ -86,6 +108,60 @@ func TestGetCardByIDAfterTheCardIsDeleted(t *testing.T) {
 	w = get(t, h.GetCardByID, owner, cardRoute, cardPath(cardID))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected the deleted Card to be gone, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Deleting a Card takes it out of the Review queue too: the Card is gone from
+// every read path, not only the by-id one.
+func TestGetReviewsAfterTheCardIsDeleted(t *testing.T) {
+	h := newTestHandler(t)
+	learner := seedUser(t, "learner@example.com")
+	deckID := seedDeck(t, learner, false)
+	cardID := seedCard(t, deckID, "지운", "deleted")
+	seedDueReview(t, learner, cardID)
+
+	if got := cardWords(t, get(t, h.GetReviews, learner, reviewsRoute, reviewsRoute).Body.Bytes()); !slices.Equal(got, []string{"지운"}) {
+		t.Fatalf("expected the due Card in the queue to begin with, got %v", got)
+	}
+
+	if w := del(t, h.DeleteCard, learner, cardRoute, cardPath(cardID)); w.Code != http.StatusAccepted {
+		t.Fatalf("failed to delete the Card: %d: %s", w.Code, w.Body.String())
+	}
+
+	w := get(t, h.GetReviews, learner, reviewsRoute, reviewsRoute)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := cardWords(t, w.Body.Bytes()); len(got) != 0 {
+		t.Fatalf("expected the deleted Card to leave the queue, got %v", got)
+	}
+}
+
+// The since listing reads a deleted Card as gone for the same reason.
+func TestGetReviewsSinceAfterTheCardIsDeleted(t *testing.T) {
+	h := newTestHandler(t)
+	learner := seedUser(t, "learner@example.com")
+	deckID := seedDeck(t, learner, false)
+	cardID := seedCard(t, deckID, "지운", "deleted")
+	seedDueReview(t, learner, cardID)
+
+	since := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	path := fmt.Sprintf("/api/v1/reviews/since/%s", since)
+
+	if got := cardWords(t, get(t, h.GetReviewsSince, learner, "/api/v1/reviews/since/:time", path).Body.Bytes()); !slices.Equal(got, []string{"지운"}) {
+		t.Fatalf("expected the due Card in the listing to begin with, got %v", got)
+	}
+
+	if w := del(t, h.DeleteCard, learner, cardRoute, cardPath(cardID)); w.Code != http.StatusAccepted {
+		t.Fatalf("failed to delete the Card: %d: %s", w.Code, w.Body.String())
+	}
+
+	w := get(t, h.GetReviewsSince, learner, "/api/v1/reviews/since/:time", path)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := cardWords(t, w.Body.Bytes()); len(got) != 0 {
+		t.Fatalf("expected the deleted Card to leave the listing, got %v", got)
 	}
 }
 

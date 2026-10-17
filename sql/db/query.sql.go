@@ -432,8 +432,8 @@ WHERE id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
 LIMIT 1
 `
 
-// A Card the listings no longer carry is not read, written or graded: every path
-// that names one Card by id reads it through this.
+// A Card the listings no longer carry is read as gone: the paths that settle one
+// Card by its id read it through this.
 func (q *Queries) GetCard(ctx context.Context, id int64) (Card, error) {
 	row := q.db.QueryRow(ctx, getCard, id)
 	var i Card
@@ -458,6 +458,7 @@ WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
     WHERE uc.user_id = $1 AND uc.next_review_at <= NOW()
   )
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
   AND (
     d.is_public = TRUE
     OR d.owner_id = $1
@@ -505,6 +506,7 @@ WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
     WHERE uc.user_id = $1 AND uc.next_review_at <= NOW() AND uc.next_review_at > $2
   )
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
   AND (
     d.is_public = TRUE
     OR d.owner_id = $1
