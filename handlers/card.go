@@ -27,24 +27,23 @@ func (h *Handler) GetCards(c *gin.Context) {
 		}
 	}
 
+	// The Cards arrive with the caller's own Review schedules attached: they are
+	// read for the caller asking rather than assembled here.
 	var (
 		bodies []*types.Card
 		err    error
 	)
 	if targetDeckID > 0 {
-		bodies, err = h.Cards.ByDeck(c.Request.Context(), targetDeckID, page)
+		bodies, err = h.Cards.ByDeck(c.Request.Context(), caller, targetDeckID, page)
 	} else {
 		bodies, err = h.Cards.ForCaller(c.Request.Context(), caller, page)
 	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
-		return
-	}
-
-	// The Review schedules are the caller's own, so they are attached on the way
-	// out rather than held in the entry the Cards came from.
-	if err := h.Cards.AttachSchedules(c.Request.Context(), caller, bodies); err != nil {
+	switch {
+	case errors.Is(err, cards.ErrSchedules):
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
+		return
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
@@ -128,24 +127,23 @@ func (h *Handler) GetCardByID(c *gin.Context) {
 	}
 
 	// The Card belongs to a Deck, and the Deck decides who may read it. The Card
-	// is therefore read every time and the caller settled before anything answers.
-	card, err := h.Cards.ByID(c.Request.Context(), id)
+	// is therefore read every time — for the caller asking, so their own Review
+	// schedule comes with it — and the caller settled before anything answers.
+	caller, _ := middleware.Caller(c)
+	card, err := h.Cards.ByID(c.Request.Context(), caller, id)
 	switch {
 	case errors.Is(err, cards.ErrNoSuchCard):
 		respondWithError(c, http.StatusNotFound, "Card not found", err)
+		return
+	case errors.Is(err, cards.ErrSchedules):
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedule", err)
 		return
 	case err != nil:
 		respondWithError(c, http.StatusInternalServerError, "Failed to get card", err)
 		return
 	}
 
-	caller, _ := middleware.Caller(c)
 	if _, ok := h.requireReadableDeck(c, card.DeckID, caller); !ok {
-		return
-	}
-
-	if err := h.Cards.AttachSchedules(c.Request.Context(), caller, []*types.Card{card.Body}); err != nil {
-		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedule", err)
 		return
 	}
 

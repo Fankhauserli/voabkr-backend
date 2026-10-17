@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Fankhauserli/voabkr-backend/cards"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
@@ -82,8 +81,8 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		rows = cardsOfDeck(rows, targetDeckID)
 	}
 
-	returnCards := cards.Bodies(rows)
-	if err := h.Cards.AttachSchedules(c.Request.Context(), intUserID, returnCards); err != nil {
+	returnCards, err := h.Cards.FromRows(c.Request.Context(), intUserID, rows)
+	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
 		return
 	}
@@ -435,8 +434,8 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		rows = cardsOfDeck(rows, targetDeckID)
 	}
 
-	returnCards := cards.Bodies(rows)
-	if err := h.Cards.AttachSchedules(c.Request.Context(), intUserID, returnCards); err != nil {
+	returnCards, err := h.Cards.FromRows(c.Request.Context(), intUserID, rows)
+	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
 		return
 	}
