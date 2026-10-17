@@ -4,6 +4,12 @@ A Korean vocabulary study application (TOPIK preparation). Learners study Decks 
 
 ## Language
 
+### Learner accounts
+
+**Account**:
+A learner's identity in the application: their profile, settings, verification status, and the erasure that removes them.
+_Avoid_: user, member, account holder. Note "profile" and "settings" name parts of an Account, not the whole; the `/user/*` routes and their response types are wire vocabulary, not domain terms.
+
 ### Decks and sharing
 
 **Deck**:
@@ -51,6 +57,10 @@ _Avoid_: ease (ambiguous: the request field named `ease` carries the Grade, whil
 **Review schedule**:
 When a Review is due next, and the state that decides it: its Interval, Efactor, and relearning step. A Card answered Again goes back to a short relearning step before it resumes its Interval.
 _Avoid_: due date, next review
+
+**Review queue**:
+The Cards a learner is due to study, optionally within one Deck or since a given moment.
+_Avoid_: due list, study queue, backlog. Note the queue holds Cards, not Reviews: a Card is in it when the learner's Review of that Card is due.
 
 **Interval**:
 The number of days until a Review is due again.
