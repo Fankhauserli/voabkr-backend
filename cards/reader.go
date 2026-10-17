@@ -29,6 +29,11 @@ const entryTTL = 5 * time.Minute
 // listings no longer carry.
 var ErrNoSuchCard = errors.New("no such Card")
 
+// ErrSchedules wraps a failure to read the caller's own Review schedules after
+// the Cards themselves were read, so a handler can answer in the words its
+// route has always used for that failure.
+var ErrSchedules = errors.New("failed to read the Review schedules")
+
 // Reader answers every read of a Card, and clears what a write invalidates.
 type Reader struct {
 	db    *db.Queries
@@ -61,18 +66,18 @@ func deckPageKey(deckID int64, page Page) string {
 // Card is a Card with what a request about it needs beside its body: the Deck
 // that holds it, which is what decides who may read it at all.
 type Card struct {
-	// Body is the Card as the wire carries it, carrying no Review schedule until
-	// AttachSchedules gives it the caller's.
+	// Body is the Card as the wire carries it, carrying the caller's own Review
+	// schedule by the time ByID returns.
 	Body *types.Card
 
 	// DeckID is the Deck that holds the Card.
 	DeckID int64
 }
 
-// ByID returns cardID as every caller reads it, and the Deck that holds it. A
-// Card that is not there — deleted included, which the query reads as gone — is
-// ErrNoSuchCard.
-func (r *Reader) ByID(ctx context.Context, cardID int64) (Card, error) {
+// ByID returns cardID as caller reads it, carrying their own Review schedule of
+// it, and the Deck that holds it. A Card that is not there — deleted included,
+// which the query reads as gone — is ErrNoSuchCard.
+func (r *Reader) ByID(ctx context.Context, caller int64, cardID int64) (Card, error) {
 	row, err := r.db.GetCard(ctx, cardID)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -82,12 +87,18 @@ func (r *Reader) ByID(ctx context.Context, cardID int64) (Card, error) {
 		return Card{}, fmt.Errorf("failed to read the Card: %w", err)
 	}
 
-	return Card{Body: bodyOf(row), DeckID: row.DeckID}, nil
+	body := bodyOf(row)
+	if err := r.attachSchedules(ctx, caller, []*types.Card{body}); err != nil {
+		return Card{}, err
+	}
+	return Card{Body: body, DeckID: row.DeckID}, nil
 }
 
-// ByDeck returns the Deck's Cards as every caller reads them — the Deck's
-// contents, which are the same for all — so an entry answers it.
-func (r *Reader) ByDeck(ctx context.Context, deckID int64, page Page) ([]*types.Card, error) {
+// ByDeck returns the Deck's Cards as caller reads them: the Deck's contents,
+// which are the same for all, with the caller's own Review schedule of each.
+// An entry answers the contents; the schedules are attached per request and
+// never held in it (ADR-0001).
+func (r *Reader) ByDeck(ctx context.Context, caller int64, deckID int64, page Page) ([]*types.Card, error) {
 	key := deckKey(deckID)
 	if page.Paged {
 		key = deckPageKey(deckID, page)
@@ -95,6 +106,9 @@ func (r *Reader) ByDeck(ctx context.Context, deckID int64, page Page) ([]*types.
 	if r.cache != nil {
 		var cached types.CardList
 		if found, err := r.cache.GetProto(ctx, key, &cached); err == nil && found {
+			if err := r.attachSchedules(ctx, caller, cached.Cards); err != nil {
+				return nil, err
+			}
 			return cached.Cards, nil
 		}
 	}
@@ -116,15 +130,21 @@ func (r *Reader) ByDeck(ctx context.Context, deckID int64, page Page) ([]*types.
 		return nil, err
 	}
 
-	cards := Bodies(rows)
+	cards := bodies(rows)
+	// The entry holds the Deck's contents alone, so it is written before the
+	// caller's schedules are attached.
 	if r.cache != nil {
 		_ = r.cache.SetProto(ctx, key, &types.CardList{Cards: cards}, entryTTL)
+	}
+	if err := r.attachSchedules(ctx, caller, cards); err != nil {
+		return nil, err
 	}
 	return cards, nil
 }
 
-// ForCaller returns the Cards of every Deck caller may read. Which Decks those
-// are is a decision about the caller, so nothing answers this from an entry.
+// ForCaller returns the Cards of every Deck caller may read, each carrying the
+// caller's own Review schedule. Which Decks those are is a decision about the
+// caller, so nothing answers this from an entry.
 func (r *Reader) ForCaller(ctx context.Context, caller int64, page Page) ([]*types.Card, error) {
 	var (
 		rows []db.Card
@@ -143,13 +163,25 @@ func (r *Reader) ForCaller(ctx context.Context, caller int64, page Page) ([]*typ
 		return nil, err
 	}
 
-	return Bodies(rows), nil
+	return r.FromRows(ctx, caller, rows)
 }
 
-// AttachSchedules gives each Card the caller's own Review schedule of it, read
+// FromRows renders rows a caller's own query read — the Review queue reads its
+// Cards itself — as the wire carries them, carrying the caller's Review
+// schedules. A caller asks for Cards, rather than attaching their schedules
+// afterwards and hoping every read remembers to.
+func (r *Reader) FromRows(ctx context.Context, caller int64, rows []db.Card) ([]*types.Card, error) {
+	cards := bodies(rows)
+	if err := r.attachSchedules(ctx, caller, cards); err != nil {
+		return nil, err
+	}
+	return cards, nil
+}
+
+// attachSchedules gives each Card the caller's own Review schedule of it, read
 // per request: it is the one thing a Card carries that is not shared data, so no
 // entry holds it (ADR-0001). A Card the caller has not studied keeps none.
-func (r *Reader) AttachSchedules(ctx context.Context, caller int64, cards []*types.Card) error {
+func (r *Reader) attachSchedules(ctx context.Context, caller int64, cards []*types.Card) error {
 	if caller == access.Anonymous || len(cards) == 0 {
 		return nil
 	}
@@ -164,7 +196,7 @@ func (r *Reader) AttachSchedules(ctx context.Context, caller int64, cards []*typ
 		CardIds: cardIDs,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrSchedules, err)
 	}
 
 	byCard := make(map[int64]*db.UserCard, len(reviews))
@@ -202,10 +234,9 @@ func bodyOf(card db.Card) *types.Card {
 	}
 }
 
-// Bodies renders rows a caller's own query read — the Review queue reads its
-// Cards itself — as the wire carries them. It is the same mapping a listing gets,
-// so a new Card field is remembered in one place.
-func Bodies(rows []db.Card) []*types.Card {
+// bodies renders rows as the wire carries them. It is the same mapping a listing
+// gets, so a new Card field is remembered in one place.
+func bodies(rows []db.Card) []*types.Card {
 	cards := make([]*types.Card, 0, len(rows))
 	for _, row := range rows {
 		cards = append(cards, bodyOf(row))
