@@ -24,11 +24,11 @@ The application requires configuration via environment variables for database co
 | `SMTP_ADDR` | **Yes**\* | — | SMTP server host and port (`host:port`) for sending emails. | `smtp.example.com:587` |
 | `SMTP_USER` | No | — | Username for SMTP plain authentication (skipped if empty). | `notifications@example.com` |
 | `SMTP_PASS` | No | — | Password for SMTP plain authentication (skipped if empty). | `smtp-password` |
-| `FROM_EMAIL` | **Yes**\* | — | Sender email address for outgoing verification emails. | `no-reply@example.com` |
-| `FRONTEND_URL` | No | `http://localhost:5173` | Base URL of the frontend application for verification links. | `https://app.voabkr.com` |
-| `GIN_MODE` | No | `debug` | Gin framework operational mode (`debug`, `release`, `test`). | `release` |
+| `FROM_EMAIL` | **Yes**\* | — | Sender email address for outgoing account emails (verification and password reset). | `no-reply@example.com` |
+| `FRONTEND_URL` | No | `http://localhost:5173` | Base URL of the frontend application for verification and password reset links. | `https://app.voabkr.com` |
+| `GIN_MODE` | No | `debug` | Gin framework operational mode (`debug`, `release`, `test`). Explicitly `debug` also prints skipped verification tokens. | `release` |
 
-> \*) Required when user registration and email verification flows are triggered.
+> \*) Required when the registration, email verification or password reset flows are triggered.
 
 ---
 
@@ -72,7 +72,7 @@ The service uses a two-level cache for high throughput and low latency:
 #### 4. Email Delivery (SMTP)
 
 - **`SMTP_ADDR`**
-  - **Description**: Host and port of the outgoing mail server (`helpers/mail.go`).
+  - **Description**: Host and port of the outgoing mail server (`mail/mail.go`).
   - **Example**: `smtp.mailgun.org:587` or `smtp.gmail.com:587`
 - **`SMTP_USER`**
   - **Description**: Username for SMTP authentication. If left empty, authentication will not be performed.
@@ -81,13 +81,13 @@ The service uses a two-level cache for high throughput and low latency:
   - **Description**: Password for SMTP authentication.
   - **Example**: `your-smtp-password`
 - **`FROM_EMAIL`**
-  - **Description**: Sender email address populated in the `From` header of account verification emails.
+  - **Description**: Sender email address populated in the `From` header of account emails (verification and password reset).
   - **Example**: `no-reply@voabkr.com`
 
 #### 4. Web Framework (Gin)
 
 - **`GIN_MODE`**
-  - **Description**: Controls Gin framework logging and optimization. Set to `release` for production deployments.
+  - **Description**: Controls Gin framework logging and optimization. Set to `release` for production deployments. When set explicitly to `debug`, a verification token is printed if SMTP is unconfigured, so a developer can complete the flow. Any other value, including unset, never logs a token.
   - **Allowed Values**: `debug`, `release`, `test`
 
 ---
