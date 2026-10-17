@@ -4,11 +4,11 @@ import (
 	"context"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/gin-contrib/sessions"
 	"github.com/valkey-io/valkey-go"
 )
@@ -69,12 +69,6 @@ func initSessionStore() sessions.Store {
 	}
 
 	store := NewValkeyStore(client, []byte(secret))
-	store.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   3600 * 24, // 24 hours
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	store.Options(middleware.SessionOptions())
 	return store
 }

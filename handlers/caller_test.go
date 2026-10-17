@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
-	"github.com/Fankhauserli/voabkr-backend/handlers"
 	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/gin-contrib/sessions"
@@ -58,47 +57,16 @@ func TestPrivateHandlerRefusesAnUnplaceableSession(t *testing.T) {
 	}
 }
 
-// A route that serves guests answers an unplaceable session 401 rather than a
-// guest's listing: the learner is told to sign in again, which a guest's view
-// would not tell them.
-func TestPublicRoutesRefuseAnUnplaceableSession(t *testing.T) {
-	tests := []struct {
-		name    string
-		handler func(*handlers.Handler) gin.HandlerFunc
-		method  string
-		route   string
-		path    string
-		body    string
-	}{
-		{
-			name:    "the Deck listing",
-			handler: func(h *handlers.Handler) gin.HandlerFunc { return h.GetDecks },
-			method:  http.MethodGet,
-			route:   decksRoute,
-			path:    decksRoute,
-		},
-		{
-			name:    "resending a verification email",
-			handler: func(h *handlers.Handler) gin.HandlerFunc { return h.ResendVerificationEmail },
-			method:  http.MethodPost,
-			route:   "/api/v1/resend-verification",
-			path:    "/api/v1/resend-verification",
-			body:    `{}`,
-		},
-	}
+// An auth handler serves a request whose session this instance cannot place:
+// resending a verification email asks for the address in the body, exactly as it
+// does for a guest, rather than refusing the learner.
+func TestAuthHandlersServeAnUnplaceableSession(t *testing.T) {
+	h := newTestHandler(t)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := newTestHandler(t)
-			learner := dbtest.SeedUser(t, "learner@example.com")
-			dbtest.SeedDeck(t, learner, true)
+	w := serveCaller(t, h.ResendVerificationEmail, unplaceableSession, http.MethodPost, "/api/v1/resend-verification", "/api/v1/resend-verification", `{}`)
 
-			w := serveCaller(t, tt.handler(h), unplaceableSession, tt.method, tt.route, tt.path, tt.body)
-
-			if w.Code != http.StatusUnauthorized {
-				t.Fatalf("expected status 401 for an unplaceable session, got %d: %s", w.Code, w.Body.String())
-			}
-		})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected the handler's own 400 for a missing address, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

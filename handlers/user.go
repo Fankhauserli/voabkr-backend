@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -94,10 +94,9 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 	// The erased learner's Decks went with them, and so did the Cards of those.
 	h.Decks.InvalidateEveryDeck(c.Request.Context())
 
-	session := sessions.Default(c)
-	session.Clear()
-	session.Options(sessions.Options{MaxAge: -1, Path: "/"})
-	_ = session.Save()
+	// The account is gone; the cookie it was signed in with is ended by the same
+	// policy every sign-out uses.
+	_ = middleware.SignOut(c)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Account successfully erased"})
 }

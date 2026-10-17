@@ -28,7 +28,7 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 	router.Use(middleware.CORSMiddleware())
 	router.Use(middleware.PrometheusMiddleware())
 	if sessionStore != nil {
-		router.Use(sessions.Sessions("userSession", sessionStore))
+		router.Use(sessions.Sessions(middleware.SessionName, sessionStore))
 	}
 
 	router.GET("/healthz", func(c *gin.Context) {
@@ -40,37 +40,44 @@ func setupRouter(handler *handlers.Handler, sessionStore sessions.Store) *gin.En
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	api := router.Group("/api")
-	// The caller is resolved once, for both groups: private routes additionally
-	// gate on having been resolved. Without a session store there is no session to
-	// resolve a caller from, so nothing resolves and every private route answers
-	// 401 rather than panicking on a session it does not have.
+	// The caller is resolved once, for every group: each group then declares
+	// what it does with an unresolved caller. Without a session store there is
+	// no session to resolve a caller from, so nothing resolves and every private
+	// route answers 401 rather than panicking on a session it does not have.
 	if sessionStore != nil {
 		api.Use(middleware.ResolveCaller())
 	}
 	{
-		// /api/v1
-		v1public := api.Group("/v1")
+		// /api/v1 auth routes carry no gate. Signing in, registering, verifying,
+		// resending, resetting and signing out must work for a learner whose
+		// session this instance cannot place — the session is what they are
+		// there to change.
+		v1auth := api.Group("/v1")
 		{
-			v1public.POST("/login", handler.Login)
-			v1public.POST("/register", handler.Register)
-			v1public.POST("/resend-verification", handler.ResendVerificationEmail)
-			v1public.POST("/verification/:token", handler.VerifyEmail)
-			v1public.POST("/forgot-password", handler.ForgotPassword)
-			v1public.POST("/reset-password/:token", handler.ResetPassword)
+			v1auth.POST("/login", handler.Login)
+			v1auth.POST("/register", handler.Register)
+			v1auth.POST("/resend-verification", handler.ResendVerificationEmail)
+			v1auth.POST("/verification/:token", handler.VerifyEmail)
+			v1auth.POST("/forgot-password", handler.ForgotPassword)
+			v1auth.POST("/reset-password/:token", handler.ResetPassword)
+			v1auth.POST("/logout", handler.Logout)
+		}
 
-			// Public read-only access to decks and cards
-			v1public.GET("/decks/", handler.GetDecks)
-			v1public.GET("/decks/:id", handler.GetDeckByID)
-			v1public.GET("/decks/shared/:token", handler.GetSharedDeckByToken)
-			v1public.GET("/cards/", handler.GetCards)
-			v1public.GET("/cards/:id", handler.GetCardByID)
+		// Public content serves guests, but refuses a session this instance cannot
+		// place rather than handing it a guest's view.
+		v1guest := api.Group("/v1")
+		v1guest.Use(middleware.AllowGuest())
+		{
+			v1guest.GET("/decks/", handler.GetDecks)
+			v1guest.GET("/decks/:id", handler.GetDeckByID)
+			v1guest.GET("/decks/shared/:token", handler.GetSharedDeckByToken)
+			v1guest.GET("/cards/", handler.GetCards)
+			v1guest.GET("/cards/:id", handler.GetCardByID)
 		}
 
 		v1private := api.Group("/v1")
 		v1private.Use(middleware.RequireCaller())
 		{
-			v1private.POST("/logout", handler.Logout)
-
 			userGroup := v1private.Group("/user")
 			{
 				userGroup.GET("/profile", handler.GetUserProfile)

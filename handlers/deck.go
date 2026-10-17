@@ -24,13 +24,6 @@ func generateShareToken() string {
 func (h *Handler) GetDecks(c *gin.Context) {
 	caller, signedIn := middleware.Caller(c)
 
-	// A session naming a learner this instance cannot place is told to sign in
-	// again rather than served a guest's decks.
-	if middleware.UnresolvedSession(c) {
-		middleware.RefuseUnauthorized(c)
-		return
-	}
-
 	// 1. Unauthenticated (Guests) -> return only public decks
 	if !signedIn {
 		decks, err := h.Decks.Public(c.Request.Context())

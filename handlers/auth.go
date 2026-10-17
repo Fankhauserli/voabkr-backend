@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -32,17 +30,6 @@ func respondWithError(c *gin.Context, code int, message string, err error) {
 		resp["details"] = err.Error()
 	}
 	c.JSON(code, resp)
-}
-
-func setupSession(c *gin.Context, userID string) error {
-	session := sessions.Default(c)
-	session.Set("user_id", userID)
-
-	// Must call Save() to write data to Redis and issue the Set-Cookie header
-	if err := session.Save(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (h *Handler) Login(c *gin.Context) {
@@ -66,7 +53,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	err = setupSession(c, fmt.Sprint(user.ID))
+	err = middleware.SignIn(c, user.ID)
 	if err != nil {
 		log.Printf("[ERROR] Login: failed to create session for user %d (%s): %v", user.ID, req.Email, err)
 		respondWithError(c, http.StatusInternalServerError, "Failed to create session", err)
@@ -124,7 +111,7 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	err = setupSession(c, fmt.Sprint(createdUser.ID))
+	err = middleware.SignIn(c, createdUser.ID)
 	if err != nil {
 		log.Printf("[ERROR] Register: failed to create session for user %d (%s): %v", createdUser.ID, createdUser.Email, err)
 		// Clean up created user to avoid leaving an unusable orphan record
@@ -138,10 +125,7 @@ func (h *Handler) Register(c *gin.Context) {
 }
 
 func (h *Handler) Logout(c *gin.Context) {
-	session := sessions.Default(c)
-	session.Clear()
-	session.Options(sessions.Options{MaxAge: -1}) // Clears cookie on client
-	if err := session.Save(); err != nil {
+	if err := middleware.SignOut(c); err != nil {
 		log.Printf("[ERROR] Logout: failed to terminate session: %v", err)
 		respondWithError(c, http.StatusInternalServerError, "Failed to terminate session", err)
 		return
@@ -184,14 +168,9 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 
 func (h *Handler) ResendVerificationEmail(c *gin.Context) {
 	// A signed-in learner's own address is the one to send to; a guest names it
-	// in the body, and a session this instance cannot place is sent to sign in
-	// again rather than treated as one of the two.
+	// in the body. A session this instance cannot place is treated as the guest
+	// it is, so a lost verification message never strands the learner.
 	caller, signedIn := middleware.Caller(c)
-
-	if middleware.UnresolvedSession(c) {
-		middleware.RefuseUnauthorized(c)
-		return
-	}
 
 	var user db.User
 	var err error

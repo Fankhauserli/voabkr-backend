@@ -25,7 +25,11 @@ Authentication uses cookie-based sessions backed by Redis (`gin-contrib/sessions
   - `HttpOnly: true` (prevents client-side script access)
   - `Secure: true` (enforced over HTTPS)
   - `SameSite: Lax`
-- **Protected Routes**: Every request resolves the caller once from the session (`middleware.ResolveCaller`); protected endpoints additionally gate on having one (`middleware.RequireCaller`). If the session is missing, expired, or carries a learner id the server cannot read, the server aborts with `401 Unauthorized` in one shape.
+- **Route gates**: Every request resolves the caller once from the session (`middleware.ResolveCaller`). Routes then fall into three groups:
+  - **Auth routes** (`/login`, `/register`, verification, resend, forgot/reset, `/logout`) carry no gate: they work even when the session names a learner the server cannot place.
+  - **Public content** (reading Decks and Cards) serves guests, but refuses a session the server cannot place (`middleware.AllowGuest`), so it is never mistaken for a guest's view.
+  - **Private routes** require a caller (`middleware.RequireCaller`).
+  A refusal is always `401 Unauthorized` in one shape.
 - **How to authenticate requests**:
   - When you call `POST /api/v1/login` or `POST /api/v1/register`, the response includes a `Set-Cookie: userSession=...` header.
   - Subsequent requests must include this cookie.
@@ -151,15 +155,16 @@ Authenticates user credentials and starts a Redis-backed session.
   - `500 Internal Server Error`: `{"error": "Failed to create session"}`
 
 #### `POST /api/v1/logout`
-Destroys the current session in Redis and clears the client cookie.
-- **Auth**: **Required**
+Destroys the current session in Redis and clears the client cookie. It answers
+whether or not the session can be placed: a learner whose session this instance
+cannot read can still sign out.
+- **Auth**: None
 - **Example Request**:
   ```bash
   curl -X POST http://localhost:8080/api/v1/logout -b cookies.txt
   ```
 - **Responses**:
   - `200 OK`: `{"message": "Logged out successfully"}`
-  - `401 Unauthorized`: `{"error": "Unauthorized"}`
   - `500 Internal Server Error`: `{"error": "Failed to terminate session"}`
 
 #### `POST /api/v1/verification/:token`
@@ -673,7 +678,7 @@ Fetches cards due for review within a given time window (`next_review_at <= NOW(
 | `GET` | `/readyz` | No | None | `{"status":"ok"}` |
 | `POST` | `/api/v1/register` | No | `RegisterRequestBody` | `{"message":"..."}` |
 | `POST` | `/api/v1/login` | No | `LoginRequestBody` | `{"message":"..."}` |
-| `POST` | `/api/v1/logout` | **Yes** | None | `{"message":"..."}` |
+| `POST` | `/api/v1/logout` | No | None | `{"message":"..."}` |
 | `POST` | `/api/v1/verification/:token` | No | None | `{"message":"..."}` |
 | `GET` | `/api/v1/user/profile` | **Yes** | None | `UserResponse` |
 | `PUT` | `/api/v1/user/profile` | **Yes** | `UserRequest` | `{"message":"..."}` |
