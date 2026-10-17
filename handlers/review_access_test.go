@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 )
 
 const reviewsRoute = "/api/v1/reviews/"
@@ -19,10 +20,10 @@ func reviewsPath(deckID int64) string {
 // access to it, even though the queue is theirs.
 func TestGetReviewsForPrivateDeckForbiddenForOutsider(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	outsider := seedUser(t, "outsider@example.com")
-	deckID := seedDeck(t, owner, false)
-	seedCard(t, deckID, "비공개", "private")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	outsider := dbtest.SeedUser(t, "outsider@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, deckID, "비공개", "private")
 
 	w := get(t, h.GetReviews, outsider, reviewsRoute, reviewsPath(deckID))
 
@@ -34,10 +35,10 @@ func TestGetReviewsForPrivateDeckForbiddenForOutsider(t *testing.T) {
 // The owner's own session on the private deck still serves its Cards.
 func TestGetReviewsForPrivateDeckReadableByOwner(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "비공개", "private")
-	seedDueReview(t, owner, cardID)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "비공개", "private")
+	dbtest.SeedDueReview(t, owner, cardID)
 
 	w := get(t, h.GetReviews, owner, reviewsRoute, reviewsPath(deckID))
 
@@ -53,19 +54,19 @@ func TestGetReviewsForPrivateDeckReadableByOwner(t *testing.T) {
 // others.
 func TestGetReviewsQueueSkipsUnreadableDecks(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	stranger := seedUser(t, "stranger@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	stranger := dbtest.SeedUser(t, "stranger@example.com")
 
-	publicDeck := seedDeck(t, stranger, true)
-	publicCard := seedCard(t, publicDeck, "공개", "public")
-	learnerDeck := seedDeck(t, learner, false)
-	learnerCard := seedCard(t, learnerDeck, "내것", "mine")
-	strangerDeck := seedDeck(t, stranger, false)
-	strangerCard := seedCard(t, strangerDeck, "남의", "someone else's")
+	publicDeck := dbtest.SeedDeck(t, stranger, true)
+	publicCard := dbtest.SeedCard(t, publicDeck, "공개", "public")
+	learnerDeck := dbtest.SeedDeck(t, learner, false)
+	learnerCard := dbtest.SeedCard(t, learnerDeck, "내것", "mine")
+	strangerDeck := dbtest.SeedDeck(t, stranger, false)
+	strangerCard := dbtest.SeedCard(t, strangerDeck, "남의", "someone else's")
 
-	seedDueReview(t, learner, publicCard)
-	seedDueReview(t, learner, learnerCard)
-	seedDueReview(t, learner, strangerCard)
+	dbtest.SeedDueReview(t, learner, publicCard)
+	dbtest.SeedDueReview(t, learner, learnerCard)
+	dbtest.SeedDueReview(t, learner, strangerCard)
 
 	w := get(t, h.GetReviews, learner, reviewsRoute, "/api/v1/reviews/")
 
@@ -85,13 +86,13 @@ func TestGetReviewsQueueSkipsUnreadableDecks(t *testing.T) {
 // though the Review of it is theirs.
 func TestGetReviewsQueueDropsCardsOfUnreadableDecks(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	stranger := seedUser(t, "stranger@example.com")
-	strangerDeck := seedDeck(t, stranger, false)
-	cardID := seedCard(t, strangerDeck, "남의", "someone else's")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	stranger := dbtest.SeedUser(t, "stranger@example.com")
+	strangerDeck := dbtest.SeedDeck(t, stranger, false)
+	cardID := dbtest.SeedCard(t, strangerDeck, "남의", "someone else's")
 
 	// The learner studied it while they had access, so the Review has come round.
-	seedDueReview(t, learner, cardID)
+	dbtest.SeedDueReview(t, learner, cardID)
 
 	w := get(t, h.GetReviews, learner, reviewsRoute, "/api/v1/reviews/")
 
@@ -106,10 +107,10 @@ func TestGetReviewsQueueDropsCardsOfUnreadableDecks(t *testing.T) {
 // The since-time listing carries the same deck filter, and the same refusal.
 func TestGetReviewsSinceForPrivateDeckForbiddenForOutsider(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	outsider := seedUser(t, "outsider@example.com")
-	deckID := seedDeck(t, owner, false)
-	seedCard(t, deckID, "비공개", "private")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	outsider := dbtest.SeedUser(t, "outsider@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, deckID, "비공개", "private")
 
 	path := fmt.Sprintf("/api/v1/reviews/since/2026-01-01T00:00:00Z?deck_id=%d", deckID)
 	w := get(t, h.GetReviewsSince, outsider, "/api/v1/reviews/since/:time", path)

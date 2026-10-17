@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 )
 
@@ -36,9 +37,9 @@ func rfc3339(at time.Time) string {
 // backend stores that schedule rather than computing one of its own.
 func TestSubmitGradesStoresTheScheduleTheDeviceComputed(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, learner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	answeredAt := time.Now().Add(-time.Hour)
 	nextReviewAt := answeredAt.Add(6 * 24 * time.Hour)
@@ -58,7 +59,7 @@ func TestSubmitGradesStoresTheScheduleTheDeviceComputed(t *testing.T) {
 
 	// The stored Review is the device's, whole: the Interval, the Efactor, and
 	// the repetitions it computed, answered when it says it was.
-	review, err := testDB.GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: cardID})
+	review, err := dbtest.Queries(t).GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: cardID})
 	if err != nil {
 		t.Fatalf("expected a stored Review, got %v", err)
 	}
@@ -77,13 +78,13 @@ func TestSubmitGradesStoresTheScheduleTheDeviceComputed(t *testing.T) {
 // entry, and the Grades it could take are stored.
 func TestSubmitGradesRefusesOneEntryWithoutFailingTheBatch(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	stranger := seedUser(t, "stranger@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	stranger := dbtest.SeedUser(t, "stranger@example.com")
 
-	ownDeck := seedDeck(t, learner, false)
-	ownCard := seedCard(t, ownDeck, "내것", "mine")
-	strangerDeck := seedDeck(t, stranger, false)
-	strangerCard := seedCard(t, strangerDeck, "남의", "someone else's")
+	ownDeck := dbtest.SeedDeck(t, learner, false)
+	ownCard := dbtest.SeedCard(t, ownDeck, "내것", "mine")
+	strangerDeck := dbtest.SeedDeck(t, stranger, false)
+	strangerCard := dbtest.SeedCard(t, strangerDeck, "남의", "someone else's")
 
 	answeredAt := time.Now().Add(-time.Hour)
 	nextReviewAt := answeredAt.Add(24 * time.Hour)
@@ -116,10 +117,10 @@ func TestSubmitGradesRefusesOneEntryWithoutFailingTheBatch(t *testing.T) {
 
 	// The accepted Grade is stored; the refused Grade for a Deck the learner may
 	// not read stored nothing at all.
-	if _, err := testDB.GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: ownCard}); err != nil {
+	if _, err := dbtest.Queries(t).GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: ownCard}); err != nil {
 		t.Fatalf("expected the accepted Grade to be stored, got %v", err)
 	}
-	if _, err := testDB.GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: strangerCard}); err == nil {
+	if _, err := dbtest.Queries(t).GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: strangerCard}); err == nil {
 		t.Fatalf("expected no Review stored for a Deck the learner may not read")
 	}
 }
@@ -127,9 +128,9 @@ func TestSubmitGradesRefusesOneEntryWithoutFailingTheBatch(t *testing.T) {
 // A replayed Grade is a no-op, and between two answers the later one wins.
 func TestSubmitGradesReplayIsANoOpAndTheLaterAnswerWins(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, learner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	first := time.Now().Add(-2 * time.Hour)
 	later := first.Add(time.Hour)
@@ -148,7 +149,7 @@ func TestSubmitGradesReplayIsANoOpAndTheLaterAnswerWins(t *testing.T) {
 
 	stored := func() db.UserCard {
 		t.Helper()
-		review, err := testDB.GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: cardID})
+		review, err := dbtest.Queries(t).GetUserCard(context.Background(), db.GetUserCardParams{UserID: learner, CardID: cardID})
 		if err != nil {
 			t.Fatalf("expected a stored Review, got %v", err)
 		}
@@ -188,7 +189,7 @@ func TestSubmitGradesReplayIsANoOpAndTheLaterAnswerWins(t *testing.T) {
 // is how a mistyped key arrives — unknown fields are discarded on the way in.
 func TestSubmitGradesRefusesAnEmptyBatch(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
 
 	w := post(t, h.SubmitGrades, learner, gradesRoute, gradesRoute, `{"Grades":[]}`)
 
@@ -201,14 +202,14 @@ func TestSubmitGradesRefusesAnEmptyBatch(t *testing.T) {
 // in it, one due later and one never studied are not.
 func TestGetReviewQueueAnswersFromTheStoredSchedule(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, learner, false)
-	overdue := seedCard(t, deckID, "지난", "overdue")
-	later := seedCard(t, deckID, "나중", "not due yet")
-	seedCard(t, deckID, "새것", "never studied")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	overdue := dbtest.SeedCard(t, deckID, "지난", "overdue")
+	later := dbtest.SeedCard(t, deckID, "나중", "not due yet")
+	dbtest.SeedCard(t, deckID, "새것", "never studied")
 
-	seedScheduledReview(t, learner, overdue, time.Now().Add(-2*time.Hour))
-	seedScheduledReview(t, learner, later, time.Now().Add(2*time.Hour))
+	dbtest.SeedScheduledReview(t, learner, overdue, time.Now().Add(-2*time.Hour))
+	dbtest.SeedScheduledReview(t, learner, later, time.Now().Add(2*time.Hour))
 
 	w := get(t, h.GetReviews, learner, reviewsRoute, "/api/v1/reviews/")
 
@@ -224,13 +225,13 @@ func TestGetReviewQueueAnswersFromTheStoredSchedule(t *testing.T) {
 // what it is given; a Card the learner has not studied carries none.
 func TestCardResponsesCarryTheReviewSchedule(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, learner, false)
-	studied := seedCard(t, deckID, "배운", "studied")
-	unstudied := seedCard(t, deckID, "새것", "never studied")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	studied := dbtest.SeedCard(t, deckID, "배운", "studied")
+	unstudied := dbtest.SeedCard(t, deckID, "새것", "never studied")
 
 	nextReviewAt := time.Now().Add(48 * time.Hour).Truncate(time.Second)
-	seedScheduledReview(t, learner, studied, nextReviewAt)
+	dbtest.SeedScheduledReview(t, learner, studied, nextReviewAt)
 
 	w := get(t, h.GetCards, learner, cardsRoute, cardsPath(deckID))
 

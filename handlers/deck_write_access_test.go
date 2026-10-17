@@ -8,6 +8,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/types"
 )
 
@@ -47,14 +48,14 @@ func TestDeleteDeckRefusedToEveryoneButTheOwner(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			owner := seedUser(t, "owner@example.com")
-			caller := seedUser(t, "learner@example.com")
+			owner := dbtest.SeedUser(t, "owner@example.com")
+			caller := dbtest.SeedUser(t, "learner@example.com")
 			if tt.asOwner {
 				caller = owner
 			}
-			deckID := seedDeck(t, owner, false)
+			deckID := dbtest.SeedDeck(t, owner, false)
 			if tt.permission != "" {
-				seedShare(t, deckID, caller, tt.permission)
+				dbtest.SeedShare(t, deckID, caller, tt.permission)
 			}
 
 			w := del(t, h.DeleteDeck, caller, deckRoute, deckPath(deckID))
@@ -84,10 +85,10 @@ func TestDeleteSystemDeckRefused(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			learner := seedUser(t, "learner@example.com")
-			deckID := seedDeck(t, 0, true)
+			learner := dbtest.SeedUser(t, "learner@example.com")
+			deckID := dbtest.SeedDeck(t, 0, true)
 			if tt.permission != "" {
-				seedShare(t, deckID, learner, tt.permission)
+				dbtest.SeedShare(t, deckID, learner, tt.permission)
 			}
 
 			w := del(t, h.DeleteDeck, learner, deckRoute, deckPath(deckID))
@@ -132,15 +133,15 @@ func TestShareDeckRefusedToEveryoneButTheOwner(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			owner := seedUser(t, "owner@example.com")
-			caller := seedUser(t, "learner@example.com")
-			invited := seedUser(t, "invited@example.com")
+			owner := dbtest.SeedUser(t, "owner@example.com")
+			caller := dbtest.SeedUser(t, "learner@example.com")
+			invited := dbtest.SeedUser(t, "invited@example.com")
 			if tt.asOwner {
 				caller = owner
 			}
-			deckID := seedDeck(t, owner, false)
+			deckID := dbtest.SeedDeck(t, owner, false)
 			if tt.permission != "" {
-				seedShare(t, deckID, caller, tt.permission)
+				dbtest.SeedShare(t, deckID, caller, tt.permission)
 			}
 
 			w := post(t, h.ShareDeck, caller, deckShareRoute, deckSharePath(deckID), shareBody("invited@example.com", access.RoleView))
@@ -169,11 +170,11 @@ func TestShareSystemDeckRefused(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			learner := seedUser(t, "learner@example.com")
-			invited := seedUser(t, "invited@example.com")
-			deckID := seedDeck(t, 0, false)
+			learner := dbtest.SeedUser(t, "learner@example.com")
+			invited := dbtest.SeedUser(t, "invited@example.com")
+			deckID := dbtest.SeedDeck(t, 0, false)
 			if tt.permission != "" {
-				seedShare(t, deckID, learner, tt.permission)
+				dbtest.SeedShare(t, deckID, learner, tt.permission)
 			}
 
 			w := post(t, h.ShareDeck, learner, deckShareRoute, deckSharePath(deckID), shareBody("invited@example.com", access.RoleView))
@@ -213,16 +214,16 @@ func TestRevokeDeckShareRefusedToEveryoneButTheOwner(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			owner := seedUser(t, "owner@example.com")
-			caller := seedUser(t, "learner@example.com")
-			holder := seedUser(t, "holder@example.com")
+			owner := dbtest.SeedUser(t, "owner@example.com")
+			caller := dbtest.SeedUser(t, "learner@example.com")
+			holder := dbtest.SeedUser(t, "holder@example.com")
 			if tt.asOwner {
 				caller = owner
 			}
-			deckID := seedDeck(t, owner, false)
-			seedShare(t, deckID, holder, access.RoleView)
+			deckID := dbtest.SeedDeck(t, owner, false)
+			dbtest.SeedShare(t, deckID, holder, access.RoleView)
 			if tt.permission != "" {
-				seedShare(t, deckID, caller, tt.permission)
+				dbtest.SeedShare(t, deckID, caller, tt.permission)
 			}
 
 			w := del(t, h.RevokeDeckShare, caller, deckRevokeRoute, deckRevokePath(deckID, holder))
@@ -251,12 +252,12 @@ func TestRevokeSystemDeckShareRefused(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			learner := seedUser(t, "learner@example.com")
-			holder := seedUser(t, "holder@example.com")
-			deckID := seedDeck(t, 0, false)
-			seedShare(t, deckID, holder, access.RoleView)
+			learner := dbtest.SeedUser(t, "learner@example.com")
+			holder := dbtest.SeedUser(t, "holder@example.com")
+			deckID := dbtest.SeedDeck(t, 0, false)
+			dbtest.SeedShare(t, deckID, holder, access.RoleView)
 			if tt.permission != "" {
-				seedShare(t, deckID, learner, tt.permission)
+				dbtest.SeedShare(t, deckID, learner, tt.permission)
 			}
 
 			w := del(t, h.RevokeDeckShare, learner, deckRevokeRoute, deckRevokePath(deckID, holder))
@@ -275,9 +276,9 @@ func TestRevokeSystemDeckShareRefused(t *testing.T) {
 // never edited through the application, so a share on it carries no edit.
 func TestUpdateSystemDeckRefused(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, 0, false)
-	seedShare(t, deckID, learner, access.RoleEdit)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, 0, false)
+	dbtest.SeedShare(t, deckID, learner, access.RoleEdit)
 
 	w := put(t, h.UpdateDeck, learner, deckRoute, deckPath(deckID), `{"name":"Renamed","type":"grammar"}`)
 
@@ -293,10 +294,10 @@ func TestUpdateSystemDeckRefused(t *testing.T) {
 // changed, but not its visibility, which stays the owner's to set.
 func TestUpdateDeckNameAndTypeByEditHolder(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, owner, false)
-	seedShare(t, deckID, learner, access.RoleEdit)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedShare(t, deckID, learner, access.RoleEdit)
 
 	w := put(t, h.UpdateDeck, learner, deckRoute, deckPath(deckID), `{"name":"Renamed","type":"grammar","isPublic":true}`)
 

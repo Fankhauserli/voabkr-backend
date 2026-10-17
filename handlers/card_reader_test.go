@@ -10,6 +10,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/types"
 )
 
@@ -29,8 +30,8 @@ func cardHasSchedule(t *testing.T, body []byte) bool {
 // listing a learner reads next carries it, rather than the Cards it held before.
 func TestGetCardsAfterCreatingACard(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 
 	if words := deckCardWords(t, h, owner, deckID); len(words) != 0 {
 		t.Fatalf("expected an empty Deck to begin with, got %v", words)
@@ -49,9 +50,9 @@ func TestGetCardsAfterCreatingACard(t *testing.T) {
 // Editing a Card in place leaves the entry the Deck's listing answers from.
 func TestGetCardsAfterUpdatingACard(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	if words := deckCardWords(t, h, owner, deckID); !slices.Equal(words, []string{"나무"}) {
 		t.Fatalf("expected the seeded Card to begin with, got %v", words)
@@ -70,9 +71,9 @@ func TestGetCardsAfterUpdatingACard(t *testing.T) {
 // A Card deleted leaves the entry the Deck's listing answers from.
 func TestGetCardsAfterDeletingACard(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	if words := deckCardWords(t, h, owner, deckID); !slices.Equal(words, []string{"나무"}) {
 		t.Fatalf("expected the seeded Card to begin with, got %v", words)
@@ -92,9 +93,9 @@ func TestGetCardsAfterDeletingACard(t *testing.T) {
 // a Card takes it out of every read path, not only the listings.
 func TestGetCardByIDAfterTheCardIsDeleted(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	if w := get(t, h.GetCardByID, owner, cardRoute, cardPath(cardID)); w.Code != http.StatusOK {
 		t.Fatalf("expected the seeded Card to be readable, got %d: %s", w.Code, w.Body.String())
@@ -115,10 +116,10 @@ func TestGetCardByIDAfterTheCardIsDeleted(t *testing.T) {
 // every read path, not only the by-id one.
 func TestGetReviewsAfterTheCardIsDeleted(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, learner, false)
-	cardID := seedCard(t, deckID, "지운", "deleted")
-	seedDueReview(t, learner, cardID)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "지운", "deleted")
+	dbtest.SeedDueReview(t, learner, cardID)
 
 	if got := cardWords(t, get(t, h.GetReviews, learner, reviewsRoute, reviewsRoute).Body.Bytes()); !slices.Equal(got, []string{"지운"}) {
 		t.Fatalf("expected the due Card in the queue to begin with, got %v", got)
@@ -140,10 +141,10 @@ func TestGetReviewsAfterTheCardIsDeleted(t *testing.T) {
 // The since listing reads a deleted Card as gone for the same reason.
 func TestGetReviewsSinceAfterTheCardIsDeleted(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, learner, false)
-	cardID := seedCard(t, deckID, "지운", "deleted")
-	seedDueReview(t, learner, cardID)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "지운", "deleted")
+	dbtest.SeedDueReview(t, learner, cardID)
 
 	since := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
 	path := fmt.Sprintf("/api/v1/reviews/since/%s", since)
@@ -169,11 +170,11 @@ func TestGetReviewsSinceAfterTheCardIsDeleted(t *testing.T) {
 // Card the caller has not studied carries none.
 func TestGetCardByIDCarriesTheCallersSchedule(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, true)
-	studied := seedCard(t, deckID, "배운", "studied")
-	unstudied := seedCard(t, deckID, "안 배운", "unstudied")
-	seedScheduledReview(t, owner, studied, time.Now().Add(24*time.Hour).Truncate(time.Second))
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, true)
+	studied := dbtest.SeedCard(t, deckID, "배운", "studied")
+	unstudied := dbtest.SeedCard(t, deckID, "안 배운", "unstudied")
+	dbtest.SeedScheduledReview(t, owner, studied, time.Now().Add(24*time.Hour).Truncate(time.Second))
 
 	tests := []struct {
 		name      string
@@ -202,8 +203,8 @@ func TestGetCardByIDCarriesTheCallersSchedule(t *testing.T) {
 // too: the window a learner reads next is the Deck's Cards as they are now.
 func TestGetCardsPagedAfterCreatingACard(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 	paged := cardsPath(deckID) + "&limit=1&offset=0"
 
 	if words := listedWords(t, h, owner, paged); len(words) != 0 {
@@ -223,13 +224,13 @@ func TestGetCardsPagedAfterCreatingACard(t *testing.T) {
 // Moving a Card between Decks leaves neither Deck's entry stale.
 func TestGetCardsAfterMovingACardBetweenDecks(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	fromDeck := seedDeck(t, owner, false)
-	toDeck := seedDeck(t, owner, false)
-	cardID := seedCard(t, fromDeck, "나무", "tree")
-	seedShare(t, fromDeck, learner, access.RoleEdit)
-	seedShare(t, toDeck, learner, access.RoleEdit)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	fromDeck := dbtest.SeedDeck(t, owner, false)
+	toDeck := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, fromDeck, "나무", "tree")
+	dbtest.SeedShare(t, fromDeck, learner, access.RoleEdit)
+	dbtest.SeedShare(t, toDeck, learner, access.RoleEdit)
 
 	if words := deckCardWords(t, h, learner, fromDeck); !slices.Equal(words, []string{"나무"}) {
 		t.Fatalf("expected the Card in the Deck that holds it, got %v", words)
@@ -255,8 +256,8 @@ func TestGetCardsAfterMovingACardBetweenDecks(t *testing.T) {
 // different answer.
 func TestGetCardByIDMissingCardNotFound(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	dbtest.SeedDeck(t, owner, false)
 
 	w := get(t, h.GetCardByID, owner, cardRoute, cardPath(99999))
 
@@ -280,9 +281,9 @@ func listedWords(t *testing.T, h *handlers.Handler, caller int64, path string) [
 // caller who has none.
 func TestGetCardByIDForAGuest(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, true)
-	cardID := seedCard(t, deckID, "공개", "public")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, true)
+	cardID := dbtest.SeedCard(t, deckID, "공개", "public")
 
 	w := get(t, h.GetCardByID, access.Anonymous, cardRoute, cardPath(cardID))
 	if w.Code != http.StatusOK {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/types"
 )
 
@@ -22,8 +23,8 @@ func deckPath(deckID int64) string {
 // caller's role and the share token included — must not be served to an anonymous caller.
 func TestGetDeckByIDKeepsPrivateDeckPrivateThroughCache(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 
 	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("deck:%d", deckID), &types.Deck{
 		Id:             uint32(deckID),
@@ -45,8 +46,8 @@ func TestGetDeckByIDKeepsPrivateDeckPrivateThroughCache(t *testing.T) {
 // The owner's own fetch must not leave anything behind that an anonymous caller can read.
 func TestGetDeckByIDPrivateDeckStaysForbiddenAfterOwnerFetch(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 
 	ownerRecorder := get(t, h.GetDeckByID, owner, deckRoute, deckPath(deckID))
 	if ownerRecorder.Code != http.StatusOK {
@@ -64,8 +65,8 @@ func TestGetDeckByIDPrivateDeckStaysForbiddenAfterOwnerFetch(t *testing.T) {
 // never the role of whichever caller's fetch went first.
 func TestGetDeckByIDServesTheCallersOwnAccessRole(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, true)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, true)
 
 	ownerRecorder := get(t, h.GetDeckByID, owner, deckRoute, deckPath(deckID))
 	if ownerRecorder.Code != http.StatusOK {
@@ -89,10 +90,10 @@ func TestGetDeckByIDServesTheCallersOwnAccessRole(t *testing.T) {
 // A learner holding a view share on a private deck may read it.
 func TestGetDeckByIDPrivateDeckReadableByShareHolder(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, owner, false)
-	seedShare(t, deckID, learner, access.RoleView)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedShare(t, deckID, learner, access.RoleView)
 
 	w := get(t, h.GetDeckByID, learner, deckRoute, deckPath(deckID))
 
@@ -128,9 +129,9 @@ const decksRoute = "/api/v1/decks/"
 // public Decks alone, serves it.
 func TestGetDecksForAnonymousCallerIgnoresWarmDecksAllEntry(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	publicDeckID := seedDeck(t, owner, true)
-	privateDeckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	publicDeckID := dbtest.SeedDeck(t, owner, true)
+	privateDeckID := dbtest.SeedDeck(t, owner, false)
 
 	_ = h.Cache.SetProto(context.Background(), "decks:all", &types.DeckList{Decks: []*types.Deck{{
 		Id:             uint32(privateDeckID),

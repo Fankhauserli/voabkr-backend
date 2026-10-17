@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/types"
 )
 
@@ -23,9 +24,9 @@ func cardsPath(deckID int64) string {
 // cards:deck:<id> entry does not answer for the deck.
 func TestGetCardsOfPrivateDeckForbiddenForAnonymousCaller(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("cards:deck:%d", deckID), &types.CardList{
 		Cards: []*types.Card{{Id: 1, DeckId: uint32(deckID), KoreanWord: "나무", EnglishWord: "tree"}},
@@ -41,9 +42,9 @@ func TestGetCardsOfPrivateDeckForbiddenForAnonymousCaller(t *testing.T) {
 // The owner of a private deck still reads its Cards.
 func TestGetCardsOfPrivateDeckReadableByOwner(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	w := get(t, h.GetCards, owner, cardsRoute, cardsPath(deckID))
 
@@ -70,8 +71,8 @@ func TestGetCardsOfPrivateDeckReadableByOwner(t *testing.T) {
 // so its words can only have come from the entry.
 func TestGetCardsOfDeckServedFromWarmCache(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 
 	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("cards:deck:%d", deckID), &types.CardList{
 		Cards: []*types.Card{{Id: 1, DeckId: uint32(deckID), KoreanWord: "캐시", EnglishWord: "cache"}},
@@ -92,12 +93,12 @@ func TestGetCardsOfDeckServedFromWarmCache(t *testing.T) {
 // as if they had never studied the Card.
 func TestGetCardsFromWarmCacheCarriesTheCallersSchedule(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, learner, false)
-	cardID := seedCard(t, deckID, "배운", "studied")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "배운", "studied")
 
 	nextReviewAt := time.Now().Add(24 * time.Hour).Truncate(time.Second)
-	seedScheduledReview(t, learner, cardID, nextReviewAt)
+	dbtest.SeedScheduledReview(t, learner, cardID, nextReviewAt)
 
 	// The entry is the one the Deck's Cards are stored under, and the words in it
 	// differ from the row's, so the response shows where the Card came from.
@@ -130,16 +131,16 @@ func TestGetCardsFromWarmCacheCarriesTheCallersSchedule(t *testing.T) {
 // ones, their own, and the ones shared with them.
 func TestGetCardsWithoutDeckFilterListsOnlyReadableDecks(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	stranger := seedUser(t, "stranger@example.com")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	stranger := dbtest.SeedUser(t, "stranger@example.com")
 
-	publicDeck := seedDeck(t, owner, true)
-	seedCard(t, publicDeck, "공개", "public")
-	privateDeck := seedDeck(t, owner, false)
-	seedCard(t, privateDeck, "비공개", "private")
-	strangerDeck := seedDeck(t, stranger, false)
-	seedCard(t, strangerDeck, "남의", "someone else's")
-	seedShare(t, strangerDeck, owner, access.RoleView)
+	publicDeck := dbtest.SeedDeck(t, owner, true)
+	dbtest.SeedCard(t, publicDeck, "공개", "public")
+	privateDeck := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, privateDeck, "비공개", "private")
+	strangerDeck := dbtest.SeedDeck(t, stranger, false)
+	dbtest.SeedCard(t, strangerDeck, "남의", "someone else's")
+	dbtest.SeedShare(t, strangerDeck, owner, access.RoleView)
 
 	tests := []struct {
 		name   string
@@ -172,11 +173,11 @@ func TestGetCardsWithoutDeckFilterListsOnlyReadableDecks(t *testing.T) {
 // reaches the listing nor empties it.
 func TestGetCardsWithoutDeckFilterIgnoresWarmCacheEntry(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	publicDeck := seedDeck(t, owner, true)
-	seedCard(t, publicDeck, "공개", "public")
-	privateDeck := seedDeck(t, owner, false)
-	seedCard(t, privateDeck, "비공개", "private")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	publicDeck := dbtest.SeedDeck(t, owner, true)
+	dbtest.SeedCard(t, publicDeck, "공개", "public")
+	privateDeck := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, privateDeck, "비공개", "private")
 
 	_ = h.Cache.SetProto(context.Background(), "cards:all", &types.CardList{
 		Cards: []*types.Card{{Id: 1, DeckId: uint32(privateDeck), KoreanWord: "비공개", EnglishWord: "private"}},
@@ -217,9 +218,9 @@ func cardPath(cardID int64) string {
 // card:<id> entry is warm.
 func TestGetCardByIDInPrivateDeckForbiddenForAnonymousCaller(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("card:%d", cardID), &types.Card{
 		Id:          uint32(cardID),
@@ -238,9 +239,9 @@ func TestGetCardByIDInPrivateDeckForbiddenForAnonymousCaller(t *testing.T) {
 // The owner of the private deck still reads its Cards one by one.
 func TestGetCardByIDInPrivateDeckReadableByOwner(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	w := get(t, h.GetCardByID, owner, cardRoute, cardPath(cardID))
 
