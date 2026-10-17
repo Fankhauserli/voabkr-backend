@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/cards"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
@@ -66,7 +67,7 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		}
 	}
 
-	cards, err := h.DB.GetCardsDueForReview(c.Request.Context(), intUserID)
+	rows, err := h.DB.GetCardsDueForReview(c.Request.Context(), intUserID)
 	if err != nil {
 		log.Printf("[WARN] Review: failed to get Cards: %v", err)
 		respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
@@ -78,11 +79,11 @@ func (h *Handler) GetReviews(c *gin.Context) {
 	// them in is the device's. Which new Cards a learner meets is its decision
 	// too, so none are introduced here.
 	if targetDeckID > 0 {
-		cards = cardsOfDeck(cards, targetDeckID)
+		rows = cardsOfDeck(rows, targetDeckID)
 	}
 
-	returnCards, err := h.cardsWithSchedules(c.Request.Context(), intUserID, cards)
-	if err != nil {
+	returnCards := cards.Bodies(rows)
+	if err := h.Cards.AttachSchedules(c.Request.Context(), intUserID, returnCards); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
 		return
 	}
@@ -218,9 +219,9 @@ func parseGrade(entry *types.GradeEntry) (scheduledGrade, error) {
 }
 
 // cardsOfDeck keeps the Cards belonging to one Deck.
-func cardsOfDeck(cards []db.Card, deckID int64) []db.Card {
-	kept := make([]db.Card, 0, len(cards))
-	for _, card := range cards {
+func cardsOfDeck(rows []db.Card, deckID int64) []db.Card {
+	kept := make([]db.Card, 0, len(rows))
+	for _, card := range rows {
 		if card.DeckID == deckID {
 			kept = append(kept, card)
 		}
@@ -420,7 +421,7 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		}
 	}
 
-	cards, err := h.DB.GetCardsDueForReviewAfter(c.Request.Context(), db.GetCardsDueForReviewAfterParams{
+	rows, err := h.DB.GetCardsDueForReviewAfter(c.Request.Context(), db.GetCardsDueForReviewAfterParams{
 		UserID:       intUserID,
 		NextReviewAt: pgtype.Timestamptz{Time: sinceTime, Valid: true},
 	})
@@ -431,11 +432,11 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 	}
 
 	if targetDeckID > 0 {
-		cards = cardsOfDeck(cards, targetDeckID)
+		rows = cardsOfDeck(rows, targetDeckID)
 	}
 
-	returnCards, err := h.cardsWithSchedules(c.Request.Context(), intUserID, cards)
-	if err != nil {
+	returnCards := cards.Bodies(rows)
+	if err := h.Cards.AttachSchedules(c.Request.Context(), intUserID, returnCards); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
 		return
 	}

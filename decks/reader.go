@@ -59,18 +59,9 @@ const sharedPrefix = "deck:shared:"
 // holds data, never decisions (ADR-0001).
 const publicListingKey = "decks:public"
 
-// cardsOfKey is the prefix a Deck's Card entries share, held under the Deck. The
-// Card reader builds those keys; what a Deck write has to clear is named here.
-func cardsOfKey(deckID int64) string { return fmt.Sprintf("cards:deck:%d", deckID) }
-
 // listingPrefix is what holds a listing a Deck appears in — the public one, where
 // its name is read by every sessionless caller.
 const listingPrefix = "decks:"
-
-// allCardsPrefix is what holds every Deck's Cards. Only erasing a learner takes
-// the Cards of Decks nobody wrote through, so it is the one write that clears
-// them wholesale.
-const allCardsPrefix = "cards:"
 
 // SharedDeck is a Deck as its share link serves it. FromEntry tells the shape
 // the link answered in: an entry holds the Deck alone, while reading the row
@@ -229,8 +220,9 @@ func (r *Reader) Shared(ctx context.Context, token string) (SharedDeck, error) {
 	return SharedDeck{Deck: shared, OwnerName: ownerName}, nil
 }
 
-// Invalidate drops every entry holding the Deck, or made from it: its Cards, the
-// public listing its name appears in, and the entry its share link answers under.
+// Invalidate drops every entry holding the Deck: the public listing its name
+// appears in, and the entry its share link answers under. What holds its Cards
+// is the Card reader's to clear, and deleting the Deck asks it to.
 //
 // It reads the Deck to find the token that link is keyed by, so a caller who is
 // deleting the Deck calls it while the row is still there.
@@ -240,7 +232,6 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 	}
 
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
-	_ = r.cache.DeletePrefix(ctx, cardsOfKey(deckID))
 
 	deck, err := r.db.GetDeck(ctx, deckID)
 	if err != nil {
@@ -258,16 +249,15 @@ func (r *Reader) Invalidate(ctx context.Context, deckID int64) {
 // InvalidateEveryDeck drops what any Deck is held under. One caller needs this
 // rather than writing through the Deck: erasing a learner's account hands their
 // Decks to no one (the foreign key sets the owner to NULL), so the Decks stay
-// and become System decks — and their Cards, the listing they appear in, and
-// every link they answer under go with the erased standing.
+// and become System decks — and the body every listing served of them, naming
+// the erased learner as owner, goes with the erased standing.
 //
-// Every link entry goes, not only those of the erased learner's Decks: which
+// Every link entry goes too, not only those of the erased learner's Decks: which
 // Decks were theirs is no longer readable from the row that would say.
 func (r *Reader) InvalidateEveryDeck(ctx context.Context) {
 	if r.cache == nil {
 		return
 	}
 	_ = r.cache.DeletePrefix(ctx, listingPrefix)
-	_ = r.cache.DeletePrefix(ctx, allCardsPrefix)
 	_ = r.cache.DeletePrefix(ctx, sharedPrefix)
 }

@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"context"
-	"fmt"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
-	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/cards"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
@@ -17,17 +15,7 @@ import (
 )
 
 func (h *Handler) GetCards(c *gin.Context) {
-	deckIDStr := c.Query("deck_id")
-	if deckIDStr == "" {
-		deckIDStr = c.Query("deckId")
-	}
-	if deckIDStr == "" {
-		deckIDStr = c.Query("deck")
-	}
-	var targetDeckID int64
-	if deckIDStr != "" {
-		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
-	}
+	targetDeckID, page := cardQuery(c)
 
 	caller, _ := middleware.Caller(c)
 
@@ -39,96 +27,64 @@ func (h *Handler) GetCards(c *gin.Context) {
 		}
 	}
 
-	// limit and offset are opt-in: a request that sends neither gets every Card,
-	// as it did before paging existed.
-	paged := c.Query("limit") != "" || c.Query("offset") != ""
-
-	limit := int32(100)
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 {
-			if l > 500 {
-				limit = 500
-			} else {
-				limit = int32(l)
-			}
-		}
-	}
-
-	offset := int32(0)
-	if offsetStr := c.Query("offset"); offsetStr != "" {
-		if o, err := strconv.ParseInt(offsetStr, 10, 32); err == nil && o >= 0 {
-			offset = int32(o)
-		}
-	}
-
-	// Only a Deck's own Cards are shared data worth an entry every caller reads.
-	// The caller's own Review schedules are not: they are attached on the way out.
-	var cacheKey string
+	var (
+		bodies []*types.Card
+		err    error
+	)
 	if targetDeckID > 0 {
-		if paged {
-			cacheKey = fmt.Sprintf("cards:deck:%d:lim%d:off%d", targetDeckID, limit, offset)
-		} else {
-			cacheKey = fmt.Sprintf("cards:deck:%d", targetDeckID)
-		}
-
-		if h.Cache != nil {
-			var cachedList types.CardList
-			if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedList); err == nil && found {
-				cards, err := h.withSchedules(c.Request.Context(), caller, cachedList.Cards)
-				if err != nil {
-					respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
-					return
-				}
-				c.JSON(http.StatusOK, cards)
-				return
-			}
-		}
+		bodies, err = h.Cards.ByDeck(c.Request.Context(), targetDeckID, page)
+	} else {
+		bodies, err = h.Cards.ForCaller(c.Request.Context(), caller, page)
 	}
-
-	if h.DB == nil {
-		c.JSON(http.StatusOK, []*types.Card{})
-		return
-	}
-
-	var cards []db.Card
-	var err error
-	switch {
-	case targetDeckID > 0 && paged:
-		cards, err = h.DB.ListCardsByDeck(c.Request.Context(), db.ListCardsByDeckParams{
-			DeckID: targetDeckID,
-			Limit:  limit,
-			Offset: offset,
-		})
-	case targetDeckID > 0:
-		cards, err = h.DB.ListCardsByDeckAll(c.Request.Context(), targetDeckID)
-	case paged:
-		cards, err = h.DB.ListAccessibleCardsPaged(c.Request.Context(), db.ListAccessibleCardsPagedParams{
-			UserID:     callerParam(caller),
-			PageLimit:  limit,
-			PageOffset: offset,
-		})
-	default:
-		cards, err = h.DB.ListAccessibleCards(c.Request.Context(), callerParam(caller))
-	}
-
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
-	returnCards, err := h.cardsWithSchedules(c.Request.Context(), caller, cards)
-	if err != nil {
+	// The Review schedules are the caller's own, so they are attached on the way
+	// out rather than held in the entry the Cards came from.
+	if err := h.Cards.AttachSchedules(c.Request.Context(), caller, bodies); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
 		return
 	}
 
-	if h.Cache != nil && cacheKey != "" {
-		// The entry holds the Deck's Cards, which are the same for every caller,
-		// and never the Review schedule of the one asking (ADR-0001).
-		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, &types.CardList{Cards: cardsWithoutSchedules(cards)}, 5*time.Minute)
+	c.JSON(http.StatusOK, bodies)
+}
+
+// cardQuery reads the Deck a listing is filtered by, and the window it asks for.
+// limit and offset are opt-in: a request that sends neither gets every Card, as
+// it did before paging existed.
+func cardQuery(c *gin.Context) (deckID int64, page cards.Page) {
+	deckIDStr := c.Query("deck_id")
+	if deckIDStr == "" {
+		deckIDStr = c.Query("deckId")
+	}
+	if deckIDStr == "" {
+		deckIDStr = c.Query("deck")
+	}
+	if deckIDStr != "" {
+		deckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
 	}
 
-	c.JSON(http.StatusOK, returnCards)
+	page.Paged = c.Query("limit") != "" || c.Query("offset") != ""
+	page.Limit = 100
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 {
+			if l > 500 {
+				page.Limit = 500
+			} else {
+				page.Limit = int32(l)
+			}
+		}
+	}
+
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if o, err := strconv.ParseInt(offsetStr, 10, 32); err == nil && o >= 0 {
+			page.Offset = int32(o)
+		}
+	}
+
+	return deckID, page
 }
 
 func (h *Handler) CreateCards(c *gin.Context) {
@@ -160,35 +116,25 @@ func (h *Handler) CreateCards(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
-	}
+	h.Cards.Invalidate(c.Request.Context(), int64(req.DeckId))
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Card created"})
 }
 
 func (h *Handler) GetCardByID(c *gin.Context) {
-	id, isValid := c.Params.Get("id")
-
-	if !isValid {
-		log.Printf("[WARN] Card: Failed to get card id")
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id", nil)
+	id, ok := cardParam(c)
+	if !ok {
 		return
 	}
 
-	intId, err := strconv.ParseInt(id, 10, 64)
-
-	if err != nil {
-		log.Printf("[WARN] Card: Failed to get card id as int: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id as int", err)
+	// The Card belongs to a Deck, and the Deck decides who may read it. The Card
+	// is therefore read every time and the caller settled before anything answers.
+	card, err := h.Cards.ByID(c.Request.Context(), id)
+	switch {
+	case errors.Is(err, cards.ErrNoSuchCard):
+		respondWithError(c, http.StatusNotFound, "Card not found", err)
 		return
-	}
-
-	// The Card belongs to a Deck, and the Deck decides who may read it. The row is
-	// therefore read every time and the caller settled before anything answers.
-	card, err := h.DB.GetCard(c.Request.Context(), intId)
-	if err != nil {
-		log.Printf("[WARN] Card: Failed to get card: %v", err)
+	case err != nil:
 		respondWithError(c, http.StatusInternalServerError, "Failed to get card", err)
 		return
 	}
@@ -198,13 +144,32 @@ func (h *Handler) GetCardByID(c *gin.Context) {
 		return
 	}
 
-	response, err := h.cardResponseFor(c.Request.Context(), caller, card)
-	if err != nil {
+	if err := h.Cards.AttachSchedules(c.Request.Context(), caller, []*types.Card{card.Body}); err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedule", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, card.Body)
+}
+
+// cardParam reads the Card id a request names. It answers the request itself:
+// 500 in the shape this route has always refused a bad id in.
+func cardParam(c *gin.Context) (int64, bool) {
+	id, isValid := c.Params.Get("id")
+	if !isValid {
+		log.Printf("[WARN] Card: Failed to get card id")
+		respondWithError(c, http.StatusInternalServerError, "Failed to get card id", nil)
+		return 0, false
+	}
+
+	intId, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		log.Printf("[WARN] Card: Failed to get card id as int: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to get card id as int", err)
+		return 0, false
+	}
+
+	return intId, true
 }
 
 func (h *Handler) UpdateCard(c *gin.Context) {
@@ -244,8 +209,10 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
+	// The Card it was in, and — when the request moved it — the Deck it landed in.
+	h.Cards.Invalidate(c.Request.Context(), card.DeckID)
+	if int64(req.DeckId) != card.DeckID {
+		h.Cards.Invalidate(c.Request.Context(), int64(req.DeckId))
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Card updated"})
@@ -264,9 +231,7 @@ func (h *Handler) DeleteCard(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
-	}
+	h.Cards.Invalidate(c.Request.Context(), card.DeckID)
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Card deleted"})
 }
@@ -280,21 +245,12 @@ func (h *Handler) DeleteCard(c *gin.Context) {
 // Both an edit and a delete go through here, so the rule is applied in one place
 // rather than re-spelled per handler.
 func (h *Handler) requireWritableCard(c *gin.Context) (db.Card, bool) {
-	id, isValid := c.Params.Get("id")
-	if !isValid {
-		log.Printf("[WARN] Card: Failed to get card id")
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id", nil)
+	id, ok := cardParam(c)
+	if !ok {
 		return db.Card{}, false
 	}
 
-	intId, err := strconv.ParseInt(id, 10, 64)
-	if err != nil {
-		log.Printf("[WARN] Card: Failed to get card id as int: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card id as int", err)
-		return db.Card{}, false
-	}
-
-	card, err := h.DB.GetCard(c.Request.Context(), intId)
+	card, err := h.DB.GetCard(c.Request.Context(), id)
 	if err != nil {
 		log.Printf("[WARN] Card: failed to get card: %v", err)
 		respondWithError(c, http.StatusNotFound, "Card not found", err)
@@ -312,117 +268,3 @@ func (h *Handler) requireWritableCard(c *gin.Context) (db.Card, bool) {
 // cardEditRefusal is how a caller is told their standing on a Deck does not
 // reach its Cards — the words a Card write is refused in.
 const cardEditRefusal = "You do not have permission to edit this deck's Cards"
-
-// cardResponseFor renders one Card with the caller's own Review schedule of it.
-func (h *Handler) cardResponseFor(ctx context.Context, caller int64, card db.Card) (*types.Card, error) {
-	schedules, err := h.reviewSchedules(ctx, caller, []int64{card.ID})
-	if err != nil {
-		return nil, err
-	}
-	return cardResponse(card, schedules[card.ID]), nil
-}
-
-// cardsWithSchedules renders Cards with the caller's own Review schedule of each,
-// so a device can compute forward from what it is given. A Card the caller has
-// not studied carries no schedule.
-//
-// A failure to read the schedules is returned rather than swallowed: a Card
-// served without the schedule it has would tell the device it was never studied.
-func (h *Handler) cardsWithSchedules(ctx context.Context, caller int64, cards []db.Card) ([]*types.Card, error) {
-	return h.withSchedules(ctx, caller, cardsWithoutSchedules(cards))
-}
-
-// cardsWithoutSchedules renders Cards as the shared data they are: a Deck's
-// Cards, with no caller's Review schedule among them, for an entry every caller
-// reads.
-func cardsWithoutSchedules(cards []db.Card) []*types.Card {
-	rendered := make([]*types.Card, 0, len(cards))
-	for _, card := range cards {
-		rendered = append(rendered, cardResponse(card, nil))
-	}
-	return rendered
-}
-
-// withSchedules gives Cards that are already rendered the caller's own Review
-// schedule of each — what comes back out of an entry they share. The Cards are
-// the caller's to fill in: a cache hands back values it unmarshalled for this
-// request, never the values it holds.
-func (h *Handler) withSchedules(ctx context.Context, caller int64, cards []*types.Card) ([]*types.Card, error) {
-	cardIDs := make([]int64, 0, len(cards))
-	for _, card := range cards {
-		cardIDs = append(cardIDs, int64(card.Id))
-	}
-
-	schedules, err := h.reviewSchedules(ctx, caller, cardIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, card := range cards {
-		if review, ok := schedules[int64(card.Id)]; ok {
-			card.ReviewSchedule = reviewSchedule(review)
-		}
-	}
-	return cards, nil
-}
-
-// reviewSchedules reads the caller's Reviews of the given Cards, keyed by Card
-// id. An anonymous caller has none, and the read is skipped.
-func (h *Handler) reviewSchedules(ctx context.Context, caller int64, cardIDs []int64) (map[int64]*db.UserCard, error) {
-	if caller == access.Anonymous || len(cardIDs) == 0 {
-		return nil, nil
-	}
-
-	reviews, err := h.DB.ListUserCardSchedules(ctx, db.ListUserCardSchedulesParams{
-		UserID:  caller,
-		CardIds: cardIDs,
-	})
-	if err != nil {
-		log.Printf("[WARN] Card: failed to read the caller's Review schedules: %v", err)
-		return nil, err
-	}
-
-	byCard := make(map[int64]*db.UserCard, len(reviews))
-	for i := range reviews {
-		byCard[reviews[i].CardID] = &reviews[i]
-	}
-	return byCard, nil
-}
-
-// cardResponse is one Card as callers see it, its Review schedule included once
-// the caller has one.
-func cardResponse(card db.Card, review *db.UserCard) *types.Card {
-	response := &types.Card{
-		Id:          uint32(card.ID),
-		DeckId:      uint32(card.DeckID),
-		KoreanWord:  card.KoreanWord,
-		EnglishWord: card.EnglishWord,
-		Context:     card.Context.String,
-		Example:     card.ExampleSentence.String,
-	}
-
-	if review != nil {
-		response.ReviewSchedule = reviewSchedule(review)
-	}
-
-	return response
-}
-
-// reviewSchedule is a stored Review as the wire carries it.
-func reviewSchedule(review *db.UserCard) *types.ReviewSchedule {
-	return &types.ReviewSchedule{
-		Interval:     review.Interval,
-		Efactor:      review.Efactor,
-		Repetitions:  review.Repetitions,
-		NextReviewAt: formatTime(review.NextReviewAt),
-	}
-}
-
-// formatTime renders a stored moment the way the wire carries it, and a NULL as
-// empty.
-func formatTime(at pgtype.Timestamptz) string {
-	if !at.Valid {
-		return ""
-	}
-	return at.Time.UTC().Format(time.RFC3339)
-}

@@ -428,10 +428,12 @@ func (q *Queries) DeleteVerificationTokensByUserID(ctx context.Context, userID i
 
 const getCard = `-- name: GetCard :one
 SELECT id, deck_id, korean_word, english_word, context, example_sentence, created_at, updated_at, deleted_at FROM cards
-WHERE id = $1
+WHERE id = $1 AND (deleted_at > NOW() OR deleted_at IS NULL)
 LIMIT 1
 `
 
+// A Card the listings no longer carry is read as gone: the paths that settle one
+// Card by its id read it through this.
 func (q *Queries) GetCard(ctx context.Context, id int64) (Card, error) {
 	row := q.db.QueryRow(ctx, getCard, id)
 	var i Card
@@ -456,6 +458,7 @@ WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
     WHERE uc.user_id = $1 AND uc.next_review_at <= NOW()
   )
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
   AND (
     d.is_public = TRUE
     OR d.owner_id = $1
@@ -503,6 +506,7 @@ WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
     WHERE uc.user_id = $1 AND uc.next_review_at <= NOW() AND uc.next_review_at > $2
   )
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
   AND (
     d.is_public = TRUE
     OR d.owner_id = $1

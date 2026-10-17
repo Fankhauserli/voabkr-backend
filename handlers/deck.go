@@ -193,6 +193,7 @@ func (h *Handler) DeleteDeck(c *gin.Context) {
 	// Cleared while the row is still there: the share-link entry is keyed by the
 	// token the row carries.
 	h.Decks.Invalidate(c.Request.Context(), intId)
+	h.Cards.Invalidate(c.Request.Context(), intId)
 
 	err = h.DB.DeleteDeck(c.Request.Context(), intId)
 	if err != nil {
