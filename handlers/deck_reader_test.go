@@ -8,6 +8,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/types"
 )
 
@@ -41,8 +42,8 @@ func deckNameThroughLink(t *testing.T, h *handlers.Handler, token string) string
 // keeps serving until it expires.
 func TestGetSharedDeckByTokenServesARenamedDeck(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 	token := readableDeckBody(t, h, owner, deckID).ShareToken
 
 	if name := deckNameThroughLink(t, h, token); name != "Seeded Deck" {
@@ -84,8 +85,8 @@ func deckNames(t *testing.T, h *handlers.Handler, caller int64) []string {
 // A Deck deleted after its link was read is gone through the link too.
 func TestGetSharedDeckByTokenAfterTheDeckIsDeleted(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 	token := readableDeckBody(t, h, owner, deckID).ShareToken
 
 	if name := deckNameThroughLink(t, h, token); name != "Seeded Deck" {
@@ -107,10 +108,10 @@ func TestGetSharedDeckByTokenAfterTheDeckIsDeleted(t *testing.T) {
 // the entry's expiry.
 func TestGetDecksAfterADeckShareIsRevoked(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, owner, false)
-	seedShare(t, deckID, learner, access.RoleView)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedShare(t, deckID, learner, access.RoleView)
 
 	if names := deckNames(t, h, learner); !slices.Contains(names, "Seeded Deck") {
 		t.Fatalf("expected the shared deck in the listing, got %v", names)
@@ -130,9 +131,9 @@ func TestGetDecksAfterADeckShareIsRevoked(t *testing.T) {
 // request.
 func TestGetDecksAfterJoiningASharedDeck(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 	token := readableDeckBody(t, h, owner, deckID).ShareToken
 
 	if names := deckNames(t, h, learner); len(names) != 0 {
@@ -154,8 +155,8 @@ func TestGetDecksAfterJoiningASharedDeck(t *testing.T) {
 // erasure, so no link still names them.
 func TestGetSharedDeckByTokenAfterTheOwnerIsErased(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 	token := readableDeckBody(t, h, owner, deckID).ShareToken
 
 	if name := deckNameThroughLink(t, h, token); name != "Seeded Deck" {
@@ -186,9 +187,9 @@ func TestGetSharedDeckByTokenAfterTheOwnerIsErased(t *testing.T) {
 // Sharing a Deck puts it in the invited learner's listing on their next request.
 func TestGetDecksAfterAShare(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 
 	if names := deckNames(t, h, learner); len(names) != 0 {
 		t.Fatalf("expected an empty listing to begin with, got %v", names)
@@ -208,8 +209,8 @@ func TestGetDecksAfterAShare(t *testing.T) {
 // Deck is served under its new name rather than the one the entry holds.
 func TestGetDecksForGuestsAfterARename(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, true)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, true)
 
 	if names := deckNames(t, h, access.Anonymous); !slices.Contains(names, "Seeded Deck") {
 		t.Fatalf("expected the public deck in the guest listing, got %v", names)
@@ -228,7 +229,7 @@ func TestGetDecksForGuestsAfterARename(t *testing.T) {
 // A Deck created appears in its owner's listing on their next request.
 func TestGetDecksAfterCreatingADeck(t *testing.T) {
 	h := newTestHandlerWithCache(t)
-	owner := seedUser(t, "owner@example.com")
+	owner := dbtest.SeedUser(t, "owner@example.com")
 
 	if names := deckNames(t, h, owner); len(names) != 0 {
 		t.Fatalf("expected an empty listing to begin with, got %v", names)

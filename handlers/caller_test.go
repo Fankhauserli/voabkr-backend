@@ -8,6 +8,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -89,8 +90,8 @@ func TestPublicRoutesRefuseAnUnplaceableSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			learner := seedUser(t, "learner@example.com")
-			seedDeck(t, learner, true)
+			learner := dbtest.SeedUser(t, "learner@example.com")
+			dbtest.SeedDeck(t, learner, true)
 
 			w := serveCaller(t, tt.handler(h), unplaceableSession, tt.method, tt.route, tt.path, tt.body)
 
@@ -106,8 +107,8 @@ func TestPublicRoutesRefuseAnUnplaceableSession(t *testing.T) {
 // being signed out.
 func TestPublicRoutesStillServeGuests(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	seedDeck(t, learner, true)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	dbtest.SeedDeck(t, learner, true)
 
 	w := get(t, h.GetDecks, access.Anonymous, decksRoute, decksRoute)
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 )
 
 // cardWriteBody is a Card as the write routes take it.
@@ -32,9 +33,9 @@ func deckCardWords(t *testing.T, h *handlers.Handler, reader, deckID int64) []st
 // leaves the Deck as it was.
 func TestCreateCardInADeckTheCallerMayNotEditForbidden(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	stranger := seedUser(t, "stranger@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	stranger := dbtest.SeedUser(t, "stranger@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 
 	w := post(t, h.CreateCards, stranger, cardsRoute, cardsRoute, cardWriteBody(deckID, "나무", "tree"))
 
@@ -49,8 +50,8 @@ func TestCreateCardInADeckTheCallerMayNotEditForbidden(t *testing.T) {
 // The owner of a Deck adds a Card to it.
 func TestCreateCardInOwnDeckByOwner(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	deckID := seedDeck(t, owner, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
 
 	w := post(t, h.CreateCards, owner, cardsRoute, cardsRoute, cardWriteBody(deckID, "나무", "tree"))
 
@@ -78,10 +79,10 @@ func TestCreateCardUnderSharePermission(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			owner := seedUser(t, "owner@example.com")
-			learner := seedUser(t, "learner@example.com")
-			deckID := seedDeck(t, owner, false)
-			seedShare(t, deckID, learner, tt.permission)
+			owner := dbtest.SeedUser(t, "owner@example.com")
+			learner := dbtest.SeedUser(t, "learner@example.com")
+			deckID := dbtest.SeedDeck(t, owner, false)
+			dbtest.SeedShare(t, deckID, learner, tt.permission)
 
 			w := post(t, h.CreateCards, learner, cardsRoute, cardsRoute, cardWriteBody(deckID, "나무", "tree"))
 
@@ -99,9 +100,9 @@ func TestCreateCardUnderSharePermission(t *testing.T) {
 // on it: `owner_id IS NULL` means maintained content, never a deck to edit.
 func TestCreateCardInSystemDeckForbidden(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, 0, true)
-	seedShare(t, deckID, learner, access.RoleEdit)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, 0, true)
+	dbtest.SeedShare(t, deckID, learner, access.RoleEdit)
 
 	w := post(t, h.CreateCards, learner, cardsRoute, cardsRoute, cardWriteBody(deckID, "나무", "tree"))
 
@@ -117,10 +118,10 @@ func TestCreateCardInSystemDeckForbidden(t *testing.T) {
 // the Card is stored in decides, and the refusal leaves the Card as it was.
 func TestUpdateCardInADeckTheCallerMayNotEditForbidden(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	stranger := seedUser(t, "stranger@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	stranger := dbtest.SeedUser(t, "stranger@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
 	w := put(t, h.UpdateCard, stranger, cardRoute, cardPath(cardID), cardWriteBody(deckID, "바다", "sea"))
 
@@ -137,11 +138,11 @@ func TestUpdateCardInADeckTheCallerMayNotEditForbidden(t *testing.T) {
 // gains nothing.
 func TestUpdateCardSettlesTheStoredCardsDeckNotTheClaimedOne(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	other := seedUser(t, "other@example.com")
-	deckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, deckID, "나무", "tree")
-	otherDeckID := seedDeck(t, other, false)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	other := dbtest.SeedUser(t, "other@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+	otherDeckID := dbtest.SeedDeck(t, other, false)
 
 	w := put(t, h.UpdateCard, other, cardRoute, cardPath(cardID), cardWriteBody(otherDeckID, "바다", "sea"))
 
@@ -160,12 +161,12 @@ func TestUpdateCardSettlesTheStoredCardsDeckNotTheClaimedOne(t *testing.T) {
 // where they may edit the Deck the Card is stored in.
 func TestUpdateCardCannotMoveIntoADeckTheCallerMayNotEdit(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	fromDeckID := seedDeck(t, owner, false)
-	targetDeckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, fromDeckID, "나무", "tree")
-	seedShare(t, fromDeckID, learner, access.RoleEdit)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	fromDeckID := dbtest.SeedDeck(t, owner, false)
+	targetDeckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, fromDeckID, "나무", "tree")
+	dbtest.SeedShare(t, fromDeckID, learner, access.RoleEdit)
 
 	w := put(t, h.UpdateCard, learner, cardRoute, cardPath(cardID), cardWriteBody(targetDeckID, "바다", "sea"))
 
@@ -184,13 +185,13 @@ func TestUpdateCardCannotMoveIntoADeckTheCallerMayNotEdit(t *testing.T) {
 // Permission on both Decks, moves the Card between them.
 func TestUpdateCardMovesBetweenDecksTheCallerMayEdit(t *testing.T) {
 	h := newTestHandler(t)
-	owner := seedUser(t, "owner@example.com")
-	learner := seedUser(t, "learner@example.com")
-	fromDeckID := seedDeck(t, owner, false)
-	targetDeckID := seedDeck(t, owner, false)
-	cardID := seedCard(t, fromDeckID, "나무", "tree")
-	seedShare(t, fromDeckID, learner, access.RoleEdit)
-	seedShare(t, targetDeckID, learner, access.RoleEdit)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	fromDeckID := dbtest.SeedDeck(t, owner, false)
+	targetDeckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, fromDeckID, "나무", "tree")
+	dbtest.SeedShare(t, fromDeckID, learner, access.RoleEdit)
+	dbtest.SeedShare(t, targetDeckID, learner, access.RoleEdit)
 
 	w := put(t, h.UpdateCard, learner, cardRoute, cardPath(cardID), cardWriteBody(targetDeckID, "바다", "sea"))
 
@@ -223,15 +224,15 @@ func TestUpdateCardUnderSharePermission(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			owner := seedUser(t, "owner@example.com")
-			caller := seedUser(t, "learner@example.com")
+			owner := dbtest.SeedUser(t, "owner@example.com")
+			caller := dbtest.SeedUser(t, "learner@example.com")
 			if tt.asOwner {
 				caller = owner
 			}
-			deckID := seedDeck(t, owner, false)
-			cardID := seedCard(t, deckID, "나무", "tree")
+			deckID := dbtest.SeedDeck(t, owner, false)
+			cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 			if tt.permission != "" {
-				seedShare(t, deckID, caller, tt.permission)
+				dbtest.SeedShare(t, deckID, caller, tt.permission)
 			}
 
 			w := put(t, h.UpdateCard, caller, cardRoute, cardPath(cardID), cardWriteBody(deckID, "바다", "sea"))
@@ -249,10 +250,10 @@ func TestUpdateCardUnderSharePermission(t *testing.T) {
 // A System deck's Cards are not edited by a learner holding a share on it.
 func TestUpdateCardInSystemDeckForbidden(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, 0, true)
-	cardID := seedCard(t, deckID, "나무", "tree")
-	seedShare(t, deckID, learner, access.RoleEdit)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, 0, true)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+	dbtest.SeedShare(t, deckID, learner, access.RoleEdit)
 
 	w := put(t, h.UpdateCard, learner, cardRoute, cardPath(cardID), cardWriteBody(deckID, "바다", "sea"))
 
@@ -283,15 +284,15 @@ func TestDeleteCardUnderSharedStanding(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
-			owner := seedUser(t, "owner@example.com")
-			caller := seedUser(t, "learner@example.com")
+			owner := dbtest.SeedUser(t, "owner@example.com")
+			caller := dbtest.SeedUser(t, "learner@example.com")
 			if tt.asOwner {
 				caller = owner
 			}
-			deckID := seedDeck(t, owner, false)
-			cardID := seedCard(t, deckID, "나무", "tree")
+			deckID := dbtest.SeedDeck(t, owner, false)
+			cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 			if tt.permission != "" {
-				seedShare(t, deckID, caller, tt.permission)
+				dbtest.SeedShare(t, deckID, caller, tt.permission)
 			}
 
 			w := del(t, h.DeleteCard, caller, cardRoute, cardPath(cardID))
@@ -309,10 +310,10 @@ func TestDeleteCardUnderSharedStanding(t *testing.T) {
 // A System deck's Cards are not deleted by a learner holding a share on it.
 func TestDeleteCardInSystemDeckForbidden(t *testing.T) {
 	h := newTestHandler(t)
-	learner := seedUser(t, "learner@example.com")
-	deckID := seedDeck(t, 0, true)
-	cardID := seedCard(t, deckID, "나무", "tree")
-	seedShare(t, deckID, learner, access.RoleEdit)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, 0, true)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+	dbtest.SeedShare(t, deckID, learner, access.RoleEdit)
 
 	w := del(t, h.DeleteCard, learner, cardRoute, cardPath(cardID))
 
