@@ -3,11 +3,9 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
@@ -35,88 +33,24 @@ func (h *Handler) GetDecks(c *gin.Context) {
 
 	// 1. Unauthenticated (Guests) -> return only public decks
 	if !signedIn {
-		// decks:public holds public Decks alone, so it reads the same for every
-		// sessionless caller. An entry that could hold a private Deck must not
-		// answer here: which Decks a caller may list is a decision about the
-		// caller, and per ADR-0001 a cached entry holds data, never decisions.
-		cacheKey := "decks:public"
-		if h.Cache != nil {
-			var cachedList types.DeckList
-			if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedList); err == nil && found {
-				c.JSON(http.StatusOK, cachedList.Decks)
-				return
-			}
-		}
-
-		decks, err := h.DB.ListPublicDecks(c.Request.Context())
+		decks, err := h.Decks.Public(c.Request.Context())
 		if err != nil {
 			respondWithError(c, http.StatusInternalServerError, "Failed to retrieve public decks", err)
 			return
 		}
 
-		returnDecks := make([]*types.Deck, 0, len(decks))
-		for _, d := range decks {
-			var ownerID uint32
-			if d.OwnerID.Valid {
-				ownerID = uint32(d.OwnerID.Int64)
-			}
-			returnDecks = append(returnDecks, &types.Deck{
-				Id:             uint32(d.ID),
-				Name:           d.Name,
-				Type:           string(d.Type),
-				OwnerId:        ownerID,
-				IsPublic:       d.IsPublic,
-				ShareToken:     d.ShareToken.String,
-				UserAccessRole: "public",
-			})
-		}
-
-		if h.Cache != nil {
-			_ = h.Cache.SetProto(c.Request.Context(), cacheKey, &types.DeckList{Decks: returnDecks}, 5*time.Minute)
-		}
-
-		c.JSON(http.StatusOK, returnDecks)
+		c.JSON(http.StatusOK, decks)
 		return
 	}
 
 	// 2. Authenticated user -> return public decks + owned decks + shared decks
-	cacheKey := fmt.Sprintf("decks:user:%d", caller)
-	if h.Cache != nil {
-		var cachedList types.DeckList
-		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedList); err == nil && found {
-			c.JSON(http.StatusOK, cachedList.Decks)
-			return
-		}
-	}
-
-	userDecks, err := h.DB.ListDecksForUser(c.Request.Context(), pgtype.Int8{Int64: caller, Valid: true})
+	decks, err := h.Decks.ForCaller(c.Request.Context(), caller)
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to retrieve decks", err)
 		return
 	}
 
-	returnDecks := make([]*types.Deck, 0, len(userDecks))
-	for _, d := range userDecks {
-		var ownerID uint32
-		if d.OwnerID.Valid {
-			ownerID = uint32(d.OwnerID.Int64)
-		}
-		returnDecks = append(returnDecks, &types.Deck{
-			Id:             uint32(d.ID),
-			Name:           d.Name,
-			Type:           string(d.Type),
-			OwnerId:        ownerID,
-			IsPublic:       d.IsPublic,
-			ShareToken:     d.ShareToken.String,
-			UserAccessRole: d.UserAccessRole,
-		})
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, &types.DeckList{Decks: returnDecks}, 5*time.Minute)
-	}
-
-	c.JSON(http.StatusOK, returnDecks)
+	c.JSON(http.StatusOK, decks)
 }
 
 func (h *Handler) CreateDeck(c *gin.Context) {
@@ -147,9 +81,7 @@ func (h *Handler) CreateDeck(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	h.Decks.Invalidate(c.Request.Context(), newDeck.ID)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Deck created",
@@ -173,29 +105,16 @@ func (h *Handler) GetDeckByID(c *gin.Context) {
 		return
 	}
 
-	// The Deck row decides who may read it, so it is read every time: a cached
-	// body would carry the Access role of whichever caller warmed it.
+	// The Deck row decides who may read it, so it is read every time: a body
+	// carrying the Access role of whoever warmed it must not answer for another
+	// caller.
 	caller, _ := middleware.Caller(c)
-	readable, ok := h.requireReadableDeck(c, intId, caller)
+	standing, ok := h.requireReadableDeck(c, intId, caller)
 	if !ok {
 		return
 	}
-	deck := readable.deck
 
-	var ownerID uint32
-	if deck.OwnerID.Valid {
-		ownerID = uint32(deck.OwnerID.Int64)
-	}
-
-	c.JSON(http.StatusOK, &types.Deck{
-		Id:             uint32(deck.ID),
-		Name:           deck.Name,
-		Type:           string(deck.Type),
-		OwnerId:        ownerID,
-		IsPublic:       deck.IsPublic,
-		ShareToken:     deck.ShareToken.String,
-		UserAccessRole: readable.role,
-	})
+	c.JSON(http.StatusOK, standing.Body())
 }
 
 func (h *Handler) UpdateDeck(c *gin.Context) {
@@ -226,9 +145,10 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 		return
 	}
 
-	// Only owner can change public/private visibility
-	isPublicToSet := standing.deck.IsPublic
-	if access.Owns(standing.deck, intUserID) {
+	// Only owner can change public/private visibility — a decision about the
+	// Deck, read from the row, where the body is for responses.
+	isPublicToSet := standing.Deck.IsPublic
+	if access.Owns(standing.Deck, intUserID) {
 		isPublicToSet = req.IsPublic
 	}
 
@@ -244,9 +164,7 @@ func (h *Handler) UpdateDeck(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	h.Decks.Invalidate(c.Request.Context(), intId)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deck updated"})
 }
@@ -272,15 +190,14 @@ func (h *Handler) DeleteDeck(c *gin.Context) {
 		return
 	}
 
+	// Cleared while the row is still there: the share-link entry is keyed by the
+	// token the row carries.
+	h.Decks.Invalidate(c.Request.Context(), intId)
+
 	err = h.DB.DeleteDeck(c.Request.Context(), intId)
 	if err != nil {
 		respondWithError(c, http.StatusInternalServerError, "Failed to delete deck", err)
 		return
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "cards:")
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deck deleted"})
@@ -307,14 +224,14 @@ func (h *Handler) ShareDeck(c *gin.Context) {
 	if !ok {
 		return
 	}
-	deck := standing.deck
+	deck := standing.Body()
 
 	// Ensure share_token exists
-	shareToken := deck.ShareToken.String
-	if !deck.ShareToken.Valid || shareToken == "" {
+	shareToken := deck.ShareToken
+	if shareToken == "" {
 		shareToken = generateShareToken()
 		_ = h.DB.SetDeckShareToken(c.Request.Context(), db.SetDeckShareTokenParams{
-			ID:         deck.ID,
+			ID:         int64(deck.Id),
 			ShareToken: pgtype.Text{String: shareToken, Valid: true},
 		})
 	}
@@ -335,7 +252,7 @@ func (h *Handler) ShareDeck(c *gin.Context) {
 		}
 
 		_, shareErr := h.DB.CreateDeckShare(c.Request.Context(), db.CreateDeckShareParams{
-			DeckID:       deck.ID,
+			DeckID:       int64(deck.Id),
 			UserID:       targetUserID,
 			InvitedEmail: pgtype.Text{String: req.Email, Valid: true},
 			Permission:   permission,
@@ -346,9 +263,7 @@ func (h *Handler) ShareDeck(c *gin.Context) {
 		}
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	h.Decks.Invalidate(c.Request.Context(), intId)
 
 	c.JSON(http.StatusOK, gin.H{
 		"shareToken": shareToken,
@@ -363,57 +278,27 @@ func (h *Handler) GetSharedDeckByToken(c *gin.Context) {
 		return
 	}
 
-	cacheKey := fmt.Sprintf("deck:shared:%s", token)
-	if h.Cache != nil {
-		var cachedDeck types.Deck
-		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedDeck); err == nil && found {
-			c.JSON(http.StatusOK, &cachedDeck)
-			return
-		}
-	}
-
-	if h.DB == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Shared deck not found or link has expired"})
-		return
-	}
-
-	deck, err := h.DB.GetDeckByShareToken(c.Request.Context(), pgtype.Text{String: token, Valid: true})
+	shared, err := h.Decks.Shared(c.Request.Context(), token)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Shared deck not found or link has expired"})
 		return
 	}
 
-	var ownerName string
-	var ownerID uint32
-	if deck.OwnerID.Valid {
-		ownerID = uint32(deck.OwnerID.Int64)
-		ownerUser, err := h.DB.GetUser(c.Request.Context(), deck.OwnerID.Int64)
-		if err == nil {
-			ownerName = ownerUser.Name
-		}
-	}
-
-	resp := &types.Deck{
-		Id:         uint32(deck.ID),
-		Name:       deck.Name,
-		Type:       string(deck.Type),
-		IsPublic:   deck.IsPublic,
-		OwnerId:    ownerID,
-		ShareToken: deck.ShareToken.String,
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, resp, 5*time.Minute)
+	// An entry holds the Deck alone; a row read also names its owner. The two
+	// shapes are a difference the wire contract keeps for now.
+	if shared.FromEntry {
+		c.JSON(http.StatusOK, shared.Deck)
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":         deck.ID,
-		"name":       deck.Name,
-		"type":       deck.Type,
-		"isPublic":   deck.IsPublic,
-		"ownerId":    ownerID,
-		"shareToken": deck.ShareToken.String,
-		"ownerName":  ownerName,
+		"id":         shared.Deck.Id,
+		"name":       shared.Deck.Name,
+		"type":       shared.Deck.Type,
+		"isPublic":   shared.Deck.IsPublic,
+		"ownerId":    shared.Deck.OwnerId,
+		"shareToken": shared.Deck.ShareToken,
+		"ownerName":  shared.OwnerName,
 	})
 }
 
@@ -428,22 +313,22 @@ func (h *Handler) JoinSharedDeck(c *gin.Context) {
 		return
 	}
 
-	deck, err := h.DB.GetDeckByShareToken(c.Request.Context(), pgtype.Text{String: token, Valid: true})
+	shared, err := h.Decks.Shared(c.Request.Context(), token)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Shared deck not found"})
 		return
 	}
 
-	if deck.OwnerID.Valid && deck.OwnerID.Int64 == intUserID {
+	if shared.Deck.OwnerId == uint32(intUserID) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "You are already the owner of this deck",
-			"data":    gin.H{"deckId": deck.ID},
+			"data":    gin.H{"deckId": shared.Deck.Id},
 		})
 		return
 	}
 
 	_, err = h.DB.CreateDeckShare(c.Request.Context(), db.CreateDeckShareParams{
-		DeckID:     deck.ID,
+		DeckID:     int64(shared.Deck.Id),
 		UserID:     pgtype.Int8{Int64: intUserID, Valid: true},
 		Permission: "view",
 	})
@@ -452,13 +337,11 @@ func (h *Handler) JoinSharedDeck(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	h.Decks.Invalidate(c.Request.Context(), int64(shared.Deck.Id))
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Deck added to your study library",
-		"data":    gin.H{"deckId": deck.ID},
+		"data":    gin.H{"deckId": shared.Deck.Id},
 	})
 }
 
@@ -486,9 +369,7 @@ func (h *Handler) RevokeDeckShare(c *gin.Context) {
 		return
 	}
 
-	if h.Cache != nil {
-		_ = h.Cache.DeletePrefix(c.Request.Context(), "decks:")
-	}
+	h.Decks.Invalidate(c.Request.Context(), deckID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Access revoked successfully"})
 }

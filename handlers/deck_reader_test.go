@@ -1,0 +1,251 @@
+package handlers_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"slices"
+	"testing"
+
+	"github.com/Fankhauserli/voabkr-backend/access"
+	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/types"
+)
+
+const sharedDeckRoute = "/api/v1/decks/shared/:token"
+
+func sharedDeckPath(token string) string {
+	return "/api/v1/decks/shared/" + token
+}
+
+// deckNameThroughLink reads the name of the Deck a share link serves, as a guest
+// the link was handed to.
+func deckNameThroughLink(t *testing.T, h *handlers.Handler, token string) string {
+	t.Helper()
+
+	w := get(t, h.GetSharedDeckByToken, access.Anonymous, sharedDeckRoute, sharedDeckPath(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to read the shared deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse the shared deck: %v", err)
+	}
+	return body.Name
+}
+
+// A Deck renamed after its link was read serves the new name through the link:
+// whatever answered the first read is an entry a write clears, not one the link
+// keeps serving until it expires.
+func TestGetSharedDeckByTokenServesARenamedDeck(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	deckID := seedDeck(t, owner, false)
+	token := readableDeckBody(t, h, owner, deckID).ShareToken
+
+	if name := deckNameThroughLink(t, h, token); name != "Seeded Deck" {
+		t.Fatalf("expected the seeded name through the link, got %q", name)
+	}
+
+	w := put(t, h.UpdateDeck, owner, deckRoute, deckPath(deckID), `{"name":"Renamed","type":"vocabulary"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to rename the deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	if name := deckNameThroughLink(t, h, token); name != "Renamed" {
+		t.Fatalf("expected the renamed deck through the link, got %q", name)
+	}
+}
+
+// deckNames returns the names in the listing caller reads, warming whatever
+// answers it.
+func deckNames(t *testing.T, h *handlers.Handler, caller int64) []string {
+	t.Helper()
+
+	w := get(t, h.GetDecks, caller, decksRoute, decksRoute)
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to read the listing as %d: %d: %s", caller, w.Code, w.Body.String())
+	}
+
+	var decks []types.Deck
+	if err := json.Unmarshal(w.Body.Bytes(), &decks); err != nil {
+		t.Fatalf("failed to parse the listing: %v", err)
+	}
+
+	names := make([]string, 0, len(decks))
+	for i := range decks {
+		names = append(names, decks[i].Name)
+	}
+	return names
+}
+
+// A Deck deleted after its link was read is gone through the link too.
+func TestGetSharedDeckByTokenAfterTheDeckIsDeleted(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	deckID := seedDeck(t, owner, false)
+	token := readableDeckBody(t, h, owner, deckID).ShareToken
+
+	if name := deckNameThroughLink(t, h, token); name != "Seeded Deck" {
+		t.Fatalf("expected the seeded name through the link, got %q", name)
+	}
+
+	w := del(t, h.DeleteDeck, owner, deckRoute, deckPath(deckID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to delete the deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	w = get(t, h.GetSharedDeckByToken, access.Anonymous, sharedDeckRoute, sharedDeckPath(token))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected the deleted deck to be gone through its link, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// A revoked DeckShare leaves the holder's listing on their next request, not at
+// the entry's expiry.
+func TestGetDecksAfterADeckShareIsRevoked(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	learner := seedUser(t, "learner@example.com")
+	deckID := seedDeck(t, owner, false)
+	seedShare(t, deckID, learner, access.RoleView)
+
+	if names := deckNames(t, h, learner); !slices.Contains(names, "Seeded Deck") {
+		t.Fatalf("expected the shared deck in the listing, got %v", names)
+	}
+
+	w := del(t, h.RevokeDeckShare, owner, deckRevokeRoute, deckRevokePath(deckID, learner))
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to revoke the share: %d: %s", w.Code, w.Body.String())
+	}
+
+	if names := deckNames(t, h, learner); slices.Contains(names, "Seeded Deck") {
+		t.Fatalf("expected the revoked deck to leave the listing, got %v", names)
+	}
+}
+
+// A Deck joined through its link appears in the joiner's listing on their next
+// request.
+func TestGetDecksAfterJoiningASharedDeck(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	learner := seedUser(t, "learner@example.com")
+	deckID := seedDeck(t, owner, false)
+	token := readableDeckBody(t, h, owner, deckID).ShareToken
+
+	if names := deckNames(t, h, learner); len(names) != 0 {
+		t.Fatalf("expected an empty listing to begin with, got %v", names)
+	}
+
+	w := post(t, h.JoinSharedDeck, learner, joinRoute, joinPath(token), "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to join the shared deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	if names := deckNames(t, h, learner); !slices.Contains(names, "Seeded Deck") {
+		t.Fatalf("expected the joined deck in the listing, got %v", names)
+	}
+}
+
+// A Deck outlives the learner it belonged to — erasing them leaves it owned by no
+// one — and the link answers from the row rather than an entry that outlived the
+// erasure, so no link still names them.
+func TestGetSharedDeckByTokenAfterTheOwnerIsErased(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	deckID := seedDeck(t, owner, false)
+	token := readableDeckBody(t, h, owner, deckID).ShareToken
+
+	if name := deckNameThroughLink(t, h, token); name != "Seeded Deck" {
+		t.Fatalf("expected the seeded name through the link, got %q", name)
+	}
+
+	w := del(t, h.DeleteAccount, owner, "/api/v1/user", "/api/v1/user")
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to erase the account: %d: %s", w.Code, w.Body.String())
+	}
+
+	w = get(t, h.GetSharedDeckByToken, access.Anonymous, sharedDeckRoute, sharedDeckPath(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected the Deck to outlive its owner, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		OwnerName string `json:"ownerName"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse the shared deck: %v", err)
+	}
+	if body.OwnerName != "" {
+		t.Fatalf("expected no owner named through the link, got %q", body.OwnerName)
+	}
+}
+
+// Sharing a Deck puts it in the invited learner's listing on their next request.
+func TestGetDecksAfterAShare(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	learner := seedUser(t, "learner@example.com")
+	deckID := seedDeck(t, owner, false)
+
+	if names := deckNames(t, h, learner); len(names) != 0 {
+		t.Fatalf("expected an empty listing to begin with, got %v", names)
+	}
+
+	w := post(t, h.ShareDeck, owner, deckShareRoute, deckSharePath(deckID), shareBody("learner@example.com", access.RoleView))
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to share the deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	if names := deckNames(t, h, learner); !slices.Contains(names, "Seeded Deck") {
+		t.Fatalf("expected the shared deck in the invited learner's listing, got %v", names)
+	}
+}
+
+// A guest's listing is answered from an entry, and a write clears it: the renamed
+// Deck is served under its new name rather than the one the entry holds.
+func TestGetDecksForGuestsAfterARename(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+	deckID := seedDeck(t, owner, true)
+
+	if names := deckNames(t, h, access.Anonymous); !slices.Contains(names, "Seeded Deck") {
+		t.Fatalf("expected the public deck in the guest listing, got %v", names)
+	}
+
+	w := put(t, h.UpdateDeck, owner, deckRoute, deckPath(deckID), `{"name":"Renamed","type":"vocabulary","isPublic":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to rename the deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	if names := deckNames(t, h, access.Anonymous); !slices.Contains(names, "Renamed") {
+		t.Fatalf("expected the renamed deck in the guest listing, got %v", names)
+	}
+}
+
+// A Deck created appears in its owner's listing on their next request.
+func TestGetDecksAfterCreatingADeck(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+	owner := seedUser(t, "owner@example.com")
+
+	if names := deckNames(t, h, owner); len(names) != 0 {
+		t.Fatalf("expected an empty listing to begin with, got %v", names)
+	}
+
+	w := post(t, h.CreateDeck, owner, decksRoute, decksRoute, `{"name":"New Deck","type":"vocabulary"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("failed to create the deck: %d: %s", w.Code, w.Body.String())
+	}
+
+	if names := deckNames(t, h, owner); !slices.Contains(names, "New Deck") {
+		t.Fatalf("expected the created deck in the listing, got %v", names)
+	}
+}
+
+const joinRoute = "/api/v1/decks/shared/:token/join"
+
+func joinPath(token string) string {
+	return "/api/v1/decks/shared/" + token + "/join"
+}
