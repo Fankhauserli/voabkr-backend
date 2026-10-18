@@ -142,7 +142,9 @@ WHERE user_id = $1 AND next_review_at <= NOW();
 
 -- name: GetCardsDueForReviewAfter :many
 -- The queue selects from the readable-Decks rule, so a Deck the caller may no
--- longer read — deleted included — takes its Cards out of the queue.
+-- longer read — deleted included — takes its Cards out of the queue. The Deck
+-- filter is applied here rather than to the rows afterwards; a zero filter means
+-- every readable Deck.
 SELECT c.* FROM cards c
 JOIN readable_decks(sqlc.arg(user_id)::bigint) d ON d.id = c.deck_id
 WHERE c.id IN (
@@ -151,17 +153,20 @@ WHERE c.id IN (
       AND uc.next_review_at <= NOW()
       AND uc.next_review_at > sqlc.arg(next_review_at)
   )
-  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL);
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND (sqlc.arg(deck_id)::bigint = 0 OR c.deck_id = sqlc.arg(deck_id));
 
 -- name: GetCardsDueForReview :many
--- The due queue selects from the same rule as every other Deck-scoped read.
+-- The due queue selects from the same rule as every other Deck-scoped read, with
+-- the same Deck filter: a zero filter means every readable Deck.
 SELECT c.* FROM cards c
 JOIN readable_decks(sqlc.arg(user_id)::bigint) d ON d.id = c.deck_id
 WHERE c.id IN (
     SELECT uc.card_id FROM user_cards uc
     WHERE uc.user_id = sqlc.arg(user_id) AND uc.next_review_at <= NOW()
   )
-  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL);
+  AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND (sqlc.arg(deck_id)::bigint = 0 OR c.deck_id = sqlc.arg(deck_id));
 
 -- name: ListUserCardSchedules :many
 -- The caller's own Review schedules for a set of Cards, so a Card response can

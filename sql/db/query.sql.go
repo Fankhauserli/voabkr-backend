@@ -459,11 +459,18 @@ WHERE c.id IN (
     WHERE uc.user_id = $1 AND uc.next_review_at <= NOW()
   )
   AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND ($2::bigint = 0 OR c.deck_id = $2)
 `
 
-// The due queue selects from the same rule as every other Deck-scoped read.
-func (q *Queries) GetCardsDueForReview(ctx context.Context, userID int64) ([]Card, error) {
-	rows, err := q.db.Query(ctx, getCardsDueForReview, userID)
+type GetCardsDueForReviewParams struct {
+	UserID int64
+	DeckID int64
+}
+
+// The due queue selects from the same rule as every other Deck-scoped read, with
+// the same Deck filter: a zero filter means every readable Deck.
+func (q *Queries) GetCardsDueForReview(ctx context.Context, arg GetCardsDueForReviewParams) ([]Card, error) {
+	rows, err := q.db.Query(ctx, getCardsDueForReview, arg.UserID, arg.DeckID)
 	if err != nil {
 		return nil, err
 	}
@@ -502,17 +509,21 @@ WHERE c.id IN (
       AND uc.next_review_at > $2
   )
   AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  AND ($3::bigint = 0 OR c.deck_id = $3)
 `
 
 type GetCardsDueForReviewAfterParams struct {
 	UserID       int64
 	NextReviewAt pgtype.Timestamptz
+	DeckID       int64
 }
 
 // The queue selects from the readable-Decks rule, so a Deck the caller may no
-// longer read — deleted included — takes its Cards out of the queue.
+// longer read — deleted included — takes its Cards out of the queue. The Deck
+// filter is applied here rather than to the rows afterwards; a zero filter means
+// every readable Deck.
 func (q *Queries) GetCardsDueForReviewAfter(ctx context.Context, arg GetCardsDueForReviewAfterParams) ([]Card, error) {
-	rows, err := q.db.Query(ctx, getCardsDueForReviewAfter, arg.UserID, arg.NextReviewAt)
+	rows, err := q.db.Query(ctx, getCardsDueForReviewAfter, arg.UserID, arg.NextReviewAt, arg.DeckID)
 	if err != nil {
 		return nil, err
 	}
