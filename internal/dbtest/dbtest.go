@@ -120,3 +120,11 @@ func Queries(t *testing.T) *db.Queries {
 	}
 	return testDB
 }
+
+// pool returns this package's connection pool, skipping or failing exactly as
+// Queries does when no container runtime was reachable.
+func pool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	_ = Queries(t)
+	return testPool
+}

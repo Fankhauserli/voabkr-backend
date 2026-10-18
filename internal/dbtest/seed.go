@@ -24,12 +24,18 @@ func SeedUser(t *testing.T, email string) int64 {
 	return user.ID
 }
 
-// SeedDeck inserts a Deck. ownerID 0 inserts a System deck; every seeded Deck
-// carries a share token, as CreateDeck leaves in production.
+// SeedDeck inserts a Deck named "Seeded Deck". ownerID 0 inserts a System deck;
+// every seeded Deck carries a share token, as CreateDeck leaves in production.
 func SeedDeck(t *testing.T, ownerID int64, isPublic bool) int64 {
 	t.Helper()
+	return SeedNamedDeck(t, ownerID, isPublic, "Seeded Deck")
+}
+
+// SeedNamedDeck inserts a Deck under the given name.
+func SeedNamedDeck(t *testing.T, ownerID int64, isPublic bool, name string) int64 {
+	t.Helper()
 	deck, err := Queries(t).CreateDeck(context.Background(), db.CreateDeckParams{
-		Name:       "Seeded Deck",
+		Name:       name,
 		Type:       db.DeckTypeVocabulary,
 		OwnerID:    pgtype.Int8{Int64: ownerID, Valid: ownerID > 0},
 		IsPublic:   isPublic,

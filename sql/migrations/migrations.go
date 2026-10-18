@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
 	"log"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -38,4 +40,33 @@ func Run(dbConnString string) error {
 	log.Println("Database migrations applied successfully")
 
 	return nil
+}
+
+// UpSQL returns the Up section of the embedded migration with the given version.
+// A test seeds rows in the state a migration is meant to repair, then applies
+// this statement directly: the package database already has every migration
+// applied before the test runs. The Up section must be a single statement,
+// because the caller executes it in one call.
+func UpSQL(version int64) (string, error) {
+	pattern := fmt.Sprintf("%05d_*.sql", version)
+	files, err := fs.Glob(embedMigrations, pattern)
+	if err != nil {
+		return "", fmt.Errorf("failed to find migration %d: %w", version, err)
+	}
+	if len(files) != 1 {
+		return "", fmt.Errorf("migration %d: expected one file matching %q, found %d", version, pattern, len(files))
+	}
+
+	content, err := fs.ReadFile(embedMigrations, files[0])
+	if err != nil {
+		return "", fmt.Errorf("failed to read migration %d: %w", version, err)
+	}
+
+	_, up, found := strings.Cut(string(content), "-- +goose Up")
+	if !found {
+		return "", fmt.Errorf("migration %d has no Up section", version)
+	}
+	up, _, _ = strings.Cut(up, "-- +goose Down")
+
+	return strings.TrimSpace(up), nil
 }

@@ -20,9 +20,8 @@ type ReadableDeck struct {
 // rather than with a query that projects the function.
 func ReadableDecks(t *testing.T, caller pgtype.Int8) []ReadableDeck {
 	t.Helper()
-	_ = Queries(t) // skip or fail exactly as every database-backed test does
 
-	rows, err := testPool.Query(context.Background(), `
+	rows, err := pool(t).Query(context.Background(), `
 		SELECT id, name, type, owner_id, is_public, share_token,
 		       created_at, updated_at, deleted_at, access_role
 		FROM readable_decks($1)`, caller)
