@@ -82,9 +82,37 @@ type Standing struct {
 	Role string
 }
 
+// Counts is what a Deck body says about its Cards: how many it holds, and how
+// many of the reader's Reviews of them are Due now.
+type Counts struct {
+	Cards int64
+	Due   int64
+}
+
 // Body is the Deck as the wire carries it, under the role the caller reads it —
-// resolved per request, and never held in an entry (ADR-0001).
-func (s Standing) Body() *types.Deck { return bodyOf(s.Deck, s.Role) }
+// resolved per request, and never held in an entry (ADR-0001). Counts are left
+// at zero for a caller that reads the Deck without them.
+func (s Standing) Body() *types.Deck { return bodyOf(s.Deck, s.Role, Counts{}) }
+
+// BodyWithCounts is the Deck as a read serves it: Body plus the Card total and
+// the caller's Due count.
+func (s Standing) BodyWithCounts(counts Counts) *types.Deck {
+	return bodyOf(s.Deck, s.Role, counts)
+}
+
+// Counts reads how many live Cards deckID holds, and how many of caller's
+// Reviews of them are Due now. It is read per request: the Due count is the
+// caller's own, and a NULL caller has none.
+func (r *Reader) Counts(ctx context.Context, deckID, caller int64) (Counts, error) {
+	row, err := r.db.GetDeckCounts(ctx, db.GetDeckCountsParams{
+		DeckID: deckID,
+		Caller: pgtype.Int8{Int64: caller, Valid: caller != access.Anonymous},
+	})
+	if err != nil {
+		return Counts{}, err
+	}
+	return Counts{Cards: row.CardCount, Due: row.DueCount}, nil
+}
 
 // StandingOn reads deckID and resolves caller's Access role on it, from the Deck
 // and the caller's own DeckShare, judging nothing by the answer. A Deck that is
@@ -127,7 +155,7 @@ func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 
 	decks := make([]*types.Deck, 0, len(rows))
 	for _, row := range rows {
-		decks = append(decks, bodyOf(listedDeck(row), row.AccessRole))
+		decks = append(decks, bodyOf(listedDeck(row), row.AccessRole, Counts{Cards: row.CardCount, Due: row.DueCount}))
 	}
 
 	if r.cache != nil {
@@ -153,7 +181,7 @@ func (r *Reader) ForCaller(ctx context.Context, caller int64) ([]*types.Deck, er
 	// reason.
 	decks := make([]*types.Deck, 0, len(rows))
 	for _, row := range rows {
-		decks = append(decks, bodyOf(listedDeck(row), row.AccessRole))
+		decks = append(decks, bodyOf(listedDeck(row), row.AccessRole, Counts{Cards: row.CardCount, Due: row.DueCount}))
 	}
 	return decks, nil
 }
@@ -174,7 +202,7 @@ func listedDeck(row db.ListReadableDecksRow) db.Deck {
 // bodyOf is the one row→wire mapping: a Deck as callers see it, carrying the
 // Access role they read it under, which is resolved per request and never held
 // in an entry (ADR-0001).
-func bodyOf(deck db.Deck, role string) *types.Deck {
+func bodyOf(deck db.Deck, role string, counts Counts) *types.Deck {
 	var ownerID uint32
 	if deck.OwnerID.Valid {
 		ownerID = uint32(deck.OwnerID.Int64)
@@ -188,6 +216,8 @@ func bodyOf(deck db.Deck, role string) *types.Deck {
 		IsPublic:       deck.IsPublic,
 		ShareToken:     deck.ShareToken.String,
 		UserAccessRole: role,
+		CardCount:      uint32(counts.Cards),
+		DueCount:       uint32(counts.Due),
 	}
 }
 
@@ -214,8 +244,13 @@ func (r *Reader) Shared(ctx context.Context, token string) (SharedDeck, error) {
 	}
 
 	// A link is read by whoever holds it, never by a caller whose standing it
-	// would carry, so the body names no Access role.
-	shared := bodyOf(deck, "")
+	// would carry, so the body names no Access role. Its reader is anonymous, so
+	// nothing in the Deck is Due to them.
+	counts, err := r.Counts(ctx, deck.ID, access.Anonymous)
+	if err != nil {
+		return SharedDeck{}, err
+	}
+	shared := bodyOf(deck, "", counts)
 	if r.cache != nil {
 		_ = r.cache.SetProto(ctx, sharedKey(token), shared, entryTTL)
 	}

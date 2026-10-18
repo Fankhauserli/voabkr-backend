@@ -285,10 +285,41 @@ ORDER BY name;
 -- one readable-Decks rule. A NULL caller is anonymous. The join to decks is what
 -- gives sqlc the row's column types; readable_decks decides which rows join and
 -- the role they carry.
-SELECT d.*, r.access_role::text AS access_role
+SELECT d.*, r.access_role::text AS access_role,
+       (
+         SELECT COUNT(*) FROM cards c
+         WHERE c.deck_id = d.id
+           AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+       )::bigint AS card_count,
+       (
+         SELECT COUNT(*) FROM user_cards uc
+         JOIN cards c ON c.id = uc.card_id
+         WHERE c.deck_id = d.id
+           AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+           AND uc.user_id = sqlc.narg(caller)::bigint
+           AND uc.next_review_at <= NOW()
+       )::bigint AS due_count
 FROM decks d
 JOIN readable_decks(sqlc.narg(caller)::bigint) r ON r.id = d.id
 ORDER BY d.name;
+
+-- name: GetDeckCounts :one
+-- The counts a Deck body carries: its live Cards, and the caller's stored
+-- Reviews of them that are due now. A NULL caller has no Reviews to count.
+SELECT
+  (
+    SELECT COUNT(*) FROM cards c
+    WHERE c.deck_id = sqlc.arg(deck_id)
+      AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  )::bigint AS card_count,
+  (
+    SELECT COUNT(*) FROM user_cards uc
+    JOIN cards c ON c.id = uc.card_id
+    WHERE c.deck_id = sqlc.arg(deck_id)
+      AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+      AND uc.user_id = sqlc.narg(caller)::bigint
+      AND uc.next_review_at <= NOW()
+  )::bigint AS due_count;
 
 -- name: CreateDeck :one
 INSERT INTO decks (

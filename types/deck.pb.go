@@ -37,8 +37,12 @@ type Deck struct {
 	ShareToken string `protobuf:"bytes,6,opt,name=share_token,json=shareToken,proto3" json:"shareToken,omitempty"`
 	// @gotags: json:"userAccessRole,omitempty"
 	UserAccessRole string `protobuf:"bytes,7,opt,name=user_access_role,json=userAccessRole,proto3" json:"userAccessRole,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// @gotags: json:"cardCount"
+	CardCount uint32 `protobuf:"varint,8,opt,name=card_count,json=cardCount,proto3" json:"cardCount"`
+	// @gotags: json:"dueCount"
+	DueCount      uint32 `protobuf:"varint,9,opt,name=due_count,json=dueCount,proto3" json:"dueCount"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Deck) Reset() {
@@ -118,6 +122,20 @@ func (x *Deck) GetUserAccessRole() string {
 		return x.UserAccessRole
 	}
 	return ""
+}
+
+func (x *Deck) GetCardCount() uint32 {
+	if x != nil {
+		return x.CardCount
+	}
+	return 0
+}
+
+func (x *Deck) GetDueCount() uint32 {
+	if x != nil {
+		return x.DueCount
+	}
+	return 0
 }
 
 type DeckRequest struct {
@@ -341,7 +359,7 @@ var File_deck_proto protoreflect.FileDescriptor
 const file_deck_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"deck.proto\x12\x05types\"\xc1\x01\n" +
+	"deck.proto\x12\x05types\"\xfd\x01\n" +
 	"\x04Deck\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -350,7 +368,10 @@ const file_deck_proto_rawDesc = "" +
 	"\tis_public\x18\x05 \x01(\bR\bisPublic\x12\x1f\n" +
 	"\vshare_token\x18\x06 \x01(\tR\n" +
 	"shareToken\x12(\n" +
-	"\x10user_access_role\x18\a \x01(\tR\x0euserAccessRole\"R\n" +
+	"\x10user_access_role\x18\a \x01(\tR\x0euserAccessRole\x12\x1d\n" +
+	"\n" +
+	"card_count\x18\b \x01(\rR\tcardCount\x12\x1b\n" +
+	"\tdue_count\x18\t \x01(\rR\bdueCount\"R\n" +
 	"\vDeckRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1b\n" +

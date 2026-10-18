@@ -19,6 +19,10 @@ message Deck {
   string share_token = 6 [json_name = "shareToken"];
   // @gotags: json:"userAccessRole,omitempty"
   string user_access_role = 7 [json_name = "userAccessRole"];
+  // @gotags: json:"cardCount"
+  uint32 card_count = 8 [json_name = "cardCount"];
+  // @gotags: json:"dueCount"
+  uint32 due_count = 9 [json_name = "dueCount"];
 }
 
 message DeckRequest {

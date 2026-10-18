@@ -105,7 +105,14 @@ func (h *Handler) GetDeckByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, standing.Body())
+	// The counts are read per request: the Due count is this caller's own.
+	counts, err := h.Decks.Counts(c.Request.Context(), intId, caller)
+	if err != nil {
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Deck counts", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, standing.BodyWithCounts(counts))
 }
 
 func (h *Handler) UpdateDeck(c *gin.Context) {
@@ -295,6 +302,8 @@ func (h *Handler) GetSharedDeckByToken(c *gin.Context) {
 		"isPublic":   shared.Deck.IsPublic,
 		"ownerId":    shared.Deck.OwnerId,
 		"shareToken": shared.Deck.ShareToken,
+		"cardCount":  shared.Deck.CardCount,
+		"dueCount":   shared.Deck.DueCount,
 		"ownerName":  shared.OwnerName,
 	})
 }
