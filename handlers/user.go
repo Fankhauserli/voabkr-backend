@@ -1,12 +1,11 @@
 package handlers
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
-	"time"
 
+	"github.com/Fankhauserli/voabkr-backend/account"
 	"github.com/Fankhauserli/voabkr-backend/middleware"
-	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
 )
@@ -16,34 +15,14 @@ func (h *Handler) GetUserProfile(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cacheKey := fmt.Sprintf("user:profile:%d", intUserID)
-	if h.Cache != nil {
-		var cachedUser types.UserResponse
-		if found, err := h.Cache.GetProto(c.Request.Context(), cacheKey, &cachedUser); err == nil && found {
-			c.JSON(http.StatusOK, &cachedUser)
-			return
-		}
-	}
 
-	user, err := h.DB.GetUser(c.Request.Context(), intUserID)
+	profile, err := h.Account.Profile(c.Request.Context(), intUserID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve user profile"})
 		return
 	}
 
-	response := types.UserResponse{
-		Id:         uint32(user.ID),
-		Name:       user.Name,
-		Email:      user.Email,
-		IsVerified: user.EmailVerified,
-		IsActive:   user.IsActive,
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.SetProto(c.Request.Context(), cacheKey, &response, 10*time.Minute)
-	}
-
-	c.JSON(http.StatusOK, &response)
+	c.JSON(http.StatusOK, profile)
 }
 
 func (h *Handler) UpdateUserProfile(c *gin.Context) {
@@ -58,21 +37,15 @@ func (h *Handler) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	err := h.DB.UpdateUser(c.Request.Context(), db.UpdateUserParams{
-		ID:    intUserID,
-		Name:  req.Name,
-		Email: req.Email,
-	})
-	if err != nil {
+	err := h.Account.UpdateProfile(c.Request.Context(), intUserID, req.Name, req.Email)
+	switch {
+	case errors.Is(err, account.ErrEmailTaken):
+		c.JSON(http.StatusConflict, gin.H{"error": "User with this email already exists"})
+	case err != nil:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user profile"})
-		return
+	default:
+		c.JSON(http.StatusOK, gin.H{"message": "User profile updated successfully"})
 	}
-
-	if h.Cache != nil {
-		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("user:profile:%d", intUserID))
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "User profile updated successfully"})
 }
 
 func (h *Handler) DeleteAccount(c *gin.Context) {
@@ -80,15 +53,11 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 	if !ok {
 		return
 	}
+
 	// Completely erase user account and records (GDPR Article 17 / Swiss revDSG right to erasure)
-	err := h.DB.HardDeleteUser(c.Request.Context(), intUserID)
-	if err != nil {
+	if err := h.Account.Erase(c.Request.Context(), intUserID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete account"})
 		return
-	}
-
-	if h.Cache != nil {
-		_ = h.Cache.Delete(c.Request.Context(), fmt.Sprintf("user:profile:%d", intUserID))
 	}
 
 	// The erased learner's Decks went with them, and so did the Cards of those.

@@ -1304,25 +1304,20 @@ const updateUser = `-- name: UpdateUser :exec
 UPDATE users
   set name = $2,
   email = $3,
-  password_hash = $4,
   updated_at = NOW()
 WHERE id = $1
 `
 
 type UpdateUserParams struct {
-	ID           int64
-	Name         string
-	Email        string
-	PasswordHash string
+	ID    int64
+	Name  string
+	Email string
 }
 
+// A profile edit changes the name and address alone: the password hash is not
+// part of the profile, and an unrelated edit must not change it.
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
-	_, err := q.db.Exec(ctx, updateUser,
-		arg.ID,
-		arg.Name,
-		arg.Email,
-		arg.PasswordHash,
-	)
+	_, err := q.db.Exec(ctx, updateUser, arg.ID, arg.Name, arg.Email)
 	return err
 }
 

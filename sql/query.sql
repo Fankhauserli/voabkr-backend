@@ -19,10 +19,11 @@ INSERT INTO users (
 RETURNING *;
 
 -- name: UpdateUser :exec
+-- A profile edit changes the name and address alone: the password hash is not
+-- part of the profile, and an unrelated edit must not change it.
 UPDATE users
   set name = $2,
   email = $3,
-  password_hash = $4,
   updated_at = NOW()
 WHERE id = $1;
 
