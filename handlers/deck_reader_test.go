@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Fankhauserli/voabkr-backend/access"
@@ -80,6 +81,40 @@ func deckNames(t *testing.T, h *handlers.Handler, caller int64) []string {
 		names = append(names, decks[i].Name)
 	}
 	return names
+}
+
+// assertEmptyDeckListing checks that the listing caller reads is the empty
+// array the API contract promises, whichever path answered it.
+func assertEmptyDeckListing(t *testing.T, h *handlers.Handler, caller int64, read string) {
+	t.Helper()
+
+	w := get(t, h.GetDecks, caller, decksRoute, decksRoute)
+	if w.Code != http.StatusOK {
+		t.Fatalf("failed to read the %s listing: %d: %s", read, w.Code, w.Body.String())
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "[]" {
+		t.Fatalf("expected the %s listing to be [], got %s", read, got)
+	}
+}
+
+// An empty listing is the empty array the API contract promises, whichever path
+// answers it: the database read, the entry its first request wrote, and the
+// listing a signed-in learner with no Decks reads.
+func TestGetDecksEmptyListingIsAnEmptyArray(t *testing.T) {
+	h := newTestHandlerWithCache(t)
+
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	assertEmptyDeckListing(t, h, learner, "signed-in")
+
+	// The guest's first request reads the database and writes its empty answer
+	// to the entry.
+	assertEmptyDeckListing(t, h, access.Anonymous, "cache-miss")
+
+	// A public Deck seeded through the database alone hides behind the entry
+	// the first request wrote, so the second request is answered from it.
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	dbtest.SeedDeck(t, owner, true)
+	assertEmptyDeckListing(t, h, access.Anonymous, "cache-hit")
 }
 
 // A Deck deleted after its link was read is gone through the link too.

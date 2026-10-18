@@ -149,7 +149,7 @@ func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 	if r.cache != nil {
 		var cached types.DeckList
 		if found, err := r.cache.GetProto(ctx, publicListingKey, &cached); err == nil && found {
-			return cached.Decks, nil
+			return nonNilListing(cached.Decks), nil
 		}
 	}
 
@@ -166,7 +166,19 @@ func (r *Reader) Public(ctx context.Context) ([]*types.Deck, error) {
 	if r.cache != nil {
 		_ = r.cache.SetProto(ctx, publicListingKey, &types.DeckList{Decks: decks}, entryTTL)
 	}
-	return decks, nil
+	return nonNilListing(decks), nil
+}
+
+// nonNilListing is the shape a listing answers in: an empty listing is an empty
+// list, never a nil one, because the wire contract promises an array. An entry
+// holds a repeated field as its elements alone, so an empty listing round-trips
+// through the cache as no field at all; the hit is normalized back to the shape
+// the read wrote.
+func nonNilListing(decks []*types.Deck) []*types.Deck {
+	if decks == nil {
+		return []*types.Deck{}
+	}
+	return decks
 }
 
 // ForCaller returns the Decks caller reads — the public ones, their own, and the
