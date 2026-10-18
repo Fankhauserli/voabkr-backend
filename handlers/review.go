@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/cards"
+	"github.com/Fankhauserli/voabkr-backend/reviews"
 	"github.com/Fankhauserli/voabkr-backend/scheduling"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
@@ -49,17 +50,7 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		return
 	}
 
-	deckIDStr := c.Query("deck_id")
-	if deckIDStr == "" {
-		deckIDStr = c.Query("deckId")
-	}
-	if deckIDStr == "" {
-		deckIDStr = c.Query("deck")
-	}
-	var targetDeckID int64
-	if deckIDStr != "" {
-		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
-	}
+	targetDeckID := queueDeckID(c)
 
 	// A study session over one Deck is settled by that Deck, before any Card is
 	// read.
@@ -69,28 +60,53 @@ func (h *Handler) GetReviews(c *gin.Context) {
 		}
 	}
 
-	rows, err := h.DB.GetCardsDueForReview(c.Request.Context(), intUserID)
+	// The queue is the module's: the Cards whose Review is due at or before now,
+	// filtered to the named Deck in SQL and carrying the caller's own schedules.
+	// The order a Session offers them in is the device's.
+	queued, err := h.Reviews.Queue(c.Request.Context(), reviews.Query{
+		Caller: intUserID,
+		DeckID: targetDeckID,
+	})
 	if err != nil {
-		log.Printf("[WARN] Review: failed to get Cards: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
+		respondQueueError(c, err)
 		return
 	}
 
-	// The queue is the stored schedule's: the Cards whose Review is due at or
-	// before now, in whatever order they are read — the order a Session offers
-	// them in is the device's. Which new Cards a learner meets is its decision
-	// too, so none are introduced here.
-	if targetDeckID > 0 {
-		rows = cardsOfDeck(rows, targetDeckID)
+	c.JSON(http.StatusOK, queued)
+}
+
+// queueDeckID reads the Deck a queue read is filtered by. All three spellings the
+// wire has carried are accepted; a missing one — and anything that is not a
+// positive id, as before the filter moved into SQL — means every readable Deck.
+func queueDeckID(c *gin.Context) int64 {
+	deckIDStr := c.Query("deck_id")
+	if deckIDStr == "" {
+		deckIDStr = c.Query("deckId")
+	}
+	if deckIDStr == "" {
+		deckIDStr = c.Query("deck")
+	}
+	if deckIDStr == "" {
+		return 0
 	}
 
-	returnCards, err := h.Cards.FromRows(c.Request.Context(), intUserID, rows)
-	if err != nil {
+	deckID, err := strconv.ParseInt(deckIDStr, 10, 64)
+	if err != nil || deckID <= 0 {
+		return 0
+	}
+	return deckID
+}
+
+// respondQueueError answers a failed queue read in the words these routes have
+// always used for each failure.
+func respondQueueError(c *gin.Context, err error) {
+	if errors.Is(err, cards.ErrSchedules) {
 		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, returnCards)
+	log.Printf("[WARN] Review: failed to get Cards: %v", err)
+	respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
 }
 
 // SubmitGrades accepts Grades the device has already scheduled, storing the
@@ -218,17 +234,6 @@ func parseGrade(entry *types.GradeEntry) (scheduledGrade, error) {
 		answeredAt:   answeredAt,
 		nextReviewAt: nextReviewAt,
 	}, nil
-}
-
-// cardsOfDeck keeps the Cards belonging to one Deck.
-func cardsOfDeck(rows []db.Card, deckID int64) []db.Card {
-	kept := make([]db.Card, 0, len(rows))
-	for _, card := range rows {
-		if card.DeckID == deckID {
-			kept = append(kept, card)
-		}
-	}
-	return kept
 }
 
 // UpdateReview schedules a Grade here, the way this backend did before the
@@ -363,17 +368,7 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		return
 	}
 
-	deckIDStr := c.Query("deck_id")
-	if deckIDStr == "" {
-		deckIDStr = c.Query("deckId")
-	}
-	if deckIDStr == "" {
-		deckIDStr = c.Query("deck")
-	}
-	var targetDeckID int64
-	if deckIDStr != "" {
-		targetDeckID, _ = strconv.ParseInt(deckIDStr, 10, 64)
-	}
+	targetDeckID := queueDeckID(c)
 
 	if targetDeckID > 0 {
 		if _, ok := h.requireReadableDeck(c, targetDeckID, intUserID); !ok {
@@ -381,25 +376,15 @@ func (h *Handler) GetReviewsSince(c *gin.Context) {
 		}
 	}
 
-	rows, err := h.DB.GetCardsDueForReviewAfter(c.Request.Context(), db.GetCardsDueForReviewAfterParams{
-		UserID:       intUserID,
-		NextReviewAt: pgtype.Timestamptz{Time: sinceTime, Valid: true},
+	queued, err := h.Reviews.Queue(c.Request.Context(), reviews.Query{
+		Caller: intUserID,
+		DeckID: targetDeckID,
+		Since:  sinceTime,
 	})
 	if err != nil {
-		log.Printf("[WARN] Review: failed to get Cards: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "failed to get Cards", err)
+		respondQueueError(c, err)
 		return
 	}
 
-	if targetDeckID > 0 {
-		rows = cardsOfDeck(rows, targetDeckID)
-	}
-
-	returnCards, err := h.Cards.FromRows(c.Request.Context(), intUserID, rows)
-	if err != nil {
-		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedules", err)
-		return
-	}
-
-	c.JSON(http.StatusOK, returnCards)
+	c.JSON(http.StatusOK, queued)
 }

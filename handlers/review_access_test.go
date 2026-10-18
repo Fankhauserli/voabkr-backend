@@ -104,6 +104,52 @@ func TestGetReviewsQueueDropsCardsOfUnreadableDecks(t *testing.T) {
 	}
 }
 
+// A study session filtered to one Deck offers only that Deck's Cards, even when
+// other Decks have due Cards of their own.
+func TestGetReviewsForOneDeckListsOnlyThatDecksCards(t *testing.T) {
+	h := newTestHandler(t)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	filteredDeck := dbtest.SeedDeck(t, learner, false)
+	otherDeck := dbtest.SeedDeck(t, learner, false)
+
+	filteredDue := dbtest.SeedCard(t, filteredDeck, "고른", "filtered")
+	dbtest.SeedDueReview(t, learner, filteredDue)
+	otherDue := dbtest.SeedCard(t, otherDeck, "다른", "other")
+	dbtest.SeedDueReview(t, learner, otherDue)
+
+	w := get(t, h.GetReviews, learner, reviewsRoute, reviewsPath(filteredDeck))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := cardWords(t, w.Body.Bytes()); !slices.Equal(got, []string{"고른"}) {
+		t.Fatalf("expected only the named Deck's Card, got %v", got)
+	}
+}
+
+// The queue keeps every spelling of the Deck filter the wire has carried.
+func TestGetReviewsKeepsTheDeckFilterAliases(t *testing.T) {
+	h := newTestHandler(t)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "고른", "filtered")
+	dbtest.SeedDueReview(t, learner, cardID)
+
+	for _, alias := range []string{"deck_id", "deckId", "deck"} {
+		t.Run(alias, func(t *testing.T) {
+			path := fmt.Sprintf("/api/v1/reviews/?%s=%d", alias, deckID)
+			w := get(t, h.GetReviews, learner, reviewsRoute, path)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+			}
+			if got := cardWords(t, w.Body.Bytes()); !slices.Equal(got, []string{"고른"}) {
+				t.Fatalf("expected the named Deck's Card, got %v", got)
+			}
+		})
+	}
+}
+
 // The since-time listing carries the same deck filter, and the same refusal.
 func TestGetReviewsSinceForPrivateDeckForbiddenForOutsider(t *testing.T) {
 	h := newTestHandler(t)

@@ -5,6 +5,7 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/cards"
 	"github.com/Fankhauserli/voabkr-backend/decks"
 	"github.com/Fankhauserli/voabkr-backend/mail"
+	"github.com/Fankhauserli/voabkr-backend/reviews"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/tokens"
 )
@@ -20,6 +21,10 @@ type Handler struct {
 	// Cards reads Cards the same way, Review schedules and all.
 	Cards *cards.Reader
 
+	// Reviews reads the queue: the Cards a learner is due to study, within one
+	// Deck or since a moment at the caller's option.
+	Reviews *reviews.Reader
+
 	// Mail delivers account messages. It is an interface so a test can observe
 	// the flow with a fake outcome; the real implementation is delivery-only and
 	// reads its configuration once, in NewHandler.
@@ -31,12 +36,14 @@ type Handler struct {
 }
 
 func NewHandler(db *db.Queries, c cache.Cache) *Handler {
+	cardReader := cards.NewReader(db, c)
 	return &Handler{
-		DB:     db,
-		Cache:  c,
-		Decks:  decks.NewReader(db, c),
-		Cards:  cards.NewReader(db, c),
-		Mail:   mail.NewFromEnv(),
-		Tokens: tokens.NewIssuer(),
+		DB:      db,
+		Cache:   c,
+		Decks:   decks.NewReader(db, c),
+		Cards:   cardReader,
+		Reviews: reviews.NewReader(db, cardReader),
+		Mail:    mail.NewFromEnv(),
+		Tokens:  tokens.NewIssuer(),
 	}
 }
