@@ -1353,12 +1353,17 @@ func (q *Queries) UpdateDeck(ctx context.Context, arg UpdateDeckParams) error {
 	return err
 }
 
-const updateUser = `-- name: UpdateUser :exec
+const updateUser = `-- name: UpdateUser :one
+WITH previous AS (
+  SELECT users.email FROM users WHERE users.id = $1
+)
 UPDATE users
   set name = $2,
   email = $3,
+  email_verified = CASE WHEN users.email = $3 THEN users.email_verified ELSE FALSE END,
   updated_at = NOW()
-WHERE id = $1
+WHERE users.id = $1
+RETURNING (SELECT previous.email FROM previous) IS DISTINCT FROM $3 AS email_changed
 `
 
 type UpdateUserParams struct {
@@ -1367,11 +1372,16 @@ type UpdateUserParams struct {
 	Email string
 }
 
-// A profile edit changes the name and address alone: the password hash is not
-// part of the profile, and an unrelated edit must not change it.
-func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
-	_, err := q.db.Exec(ctx, updateUser, arg.ID, arg.Name, arg.Email)
-	return err
+// A profile edit sets the name and address, and never the password hash. A
+// changed address clears the verification that answered for the old one and
+// reports the change, so the caller can retire the links mailed to the old
+// address; an unchanged address keeps both. The CASE reads the pre-update row,
+// which is what makes the comparison possible.
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (bool, error) {
+	row := q.db.QueryRow(ctx, updateUser, arg.ID, arg.Name, arg.Email)
+	var email_changed bool
+	err := row.Scan(&email_changed)
+	return email_changed, err
 }
 
 const updateUserCard = `-- name: UpdateUserCard :exec

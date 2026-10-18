@@ -237,7 +237,7 @@ Retrieves the authenticated user's account details.
   - `500 Internal Server Error`: `{"error": "Failed to retrieve user profile"}`
 
 #### `PUT /api/v1/user/profile`
-Updates the authenticated user's name and/or email address.
+Updates the authenticated user's name and/or email address. Changing the address clears the account's email verification and retires its pending verification links, so the next profile read reports `isVerified: false`; an unrelated edit keeps both. Resend verification to prove the new address.
 - **Auth**: **Required**
 - **Go Request Struct** (`types.UserRequest`):
   ```go
