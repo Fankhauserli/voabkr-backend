@@ -18,14 +18,22 @@ INSERT INTO users (
 )
 RETURNING *;
 
--- name: UpdateUser :exec
--- A profile edit changes the name and address alone: the password hash is not
--- part of the profile, and an unrelated edit must not change it.
+-- name: UpdateUser :one
+-- A profile edit sets the name and address, and never the password hash. A
+-- changed address clears the verification that answered for the old one and
+-- reports the change, so the caller can retire the links mailed to the old
+-- address; an unchanged address keeps both. The CASE reads the pre-update row,
+-- which is what makes the comparison possible.
+WITH previous AS (
+  SELECT users.email FROM users WHERE users.id = $1
+)
 UPDATE users
   set name = $2,
   email = $3,
+  email_verified = CASE WHEN users.email = $3 THEN users.email_verified ELSE FALSE END,
   updated_at = NOW()
-WHERE id = $1;
+WHERE users.id = $1
+RETURNING (SELECT previous.email FROM previous) IS DISTINCT FROM $3 AS email_changed;
 
 -- name: UpdateUserEmailVerified :exec
 UPDATE users

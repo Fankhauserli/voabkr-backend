@@ -75,10 +75,12 @@ func (a *Account) Profile(ctx context.Context, learner int64) (*types.UserRespon
 }
 
 // UpdateProfile changes the learner's name and address, and clears the entry
-// holding the profile it changed. An address another learner already holds is
-// ErrEmailTaken.
+// holding the profile it changed. Changing the address clears its verification
+// and retires the links mailed to the old one, so an old link cannot verify an
+// address it was never issued for; an unchanged address keeps both. An address
+// another learner already holds is ErrEmailTaken.
 func (a *Account) UpdateProfile(ctx context.Context, learner int64, name, email string) error {
-	err := a.db.UpdateUser(ctx, db.UpdateUserParams{
+	emailChanged, err := a.db.UpdateUser(ctx, db.UpdateUserParams{
 		ID:    learner,
 		Name:  name,
 		Email: email,
@@ -89,6 +91,12 @@ func (a *Account) UpdateProfile(ctx context.Context, learner int64, name, email 
 			return ErrEmailTaken
 		}
 		return err
+	}
+
+	if emailChanged {
+		if err := a.db.DeleteVerificationTokensByUserID(ctx, learner); err != nil {
+			return err
+		}
 	}
 
 	a.invalidateProfile(ctx, learner)
