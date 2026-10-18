@@ -25,6 +25,10 @@ type Handler struct {
 	// Deck or since a moment at the caller's option.
 	Reviews *reviews.Reader
 
+	// Grades writes every Grade: enrolling a Card, storing a device-computed
+	// batch, and the legacy server-computed rating. All three ask one gate.
+	Grades *reviews.Writer
+
 	// Account owns a learner's profile and settings: their cache entries, the
 	// fetch on miss, the defaults, and what a write invalidates. No handler holds
 	// one of its keys.
@@ -42,11 +46,13 @@ type Handler struct {
 
 func NewHandler(db *db.Queries, c cache.Cache) *Handler {
 	cardReader := cards.NewReader(db, c)
+	deckReader := decks.NewReader(db, c)
 	return &Handler{
 		DB:      db,
-		Decks:   decks.NewReader(db, c),
+		Decks:   deckReader,
 		Cards:   cardReader,
 		Reviews: reviews.NewReader(db, cardReader),
+		Grades:  reviews.NewWriter(db, deckReader),
 		Account: account.New(db, c),
 		Mail:    mail.NewFromEnv(),
 		Tokens:  tokens.NewIssuer(),

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -9,13 +8,11 @@ import (
 	"time"
 
 	"github.com/Fankhauserli/voabkr-backend/cards"
+	"github.com/Fankhauserli/voabkr-backend/decks"
 	"github.com/Fankhauserli/voabkr-backend/reviews"
 	"github.com/Fankhauserli/voabkr-backend/scheduling"
-	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func (h *Handler) CreateReview(c *gin.Context) {
@@ -31,17 +28,16 @@ func (h *Handler) CreateReview(c *gin.Context) {
 		return
 	}
 
-	_, err := h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
-		UserID: intUserID,
-		CardID: int64(req.CardId),
-	})
-	if err != nil {
+	err := h.Grades.Enroll(c.Request.Context(), intUserID, int64(req.CardId))
+	switch {
+	case errors.Is(err, reviews.ErrNoAccess), errors.Is(err, decks.ErrNoSuchDeck):
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access to this private deck is restricted"})
+	case err != nil:
 		log.Printf("[WARN] Review: failed to create Review: %v", err)
 		respondWithError(c, http.StatusBadRequest, "Failed to create Review", err)
-		return
+	default:
+		c.JSON(http.StatusCreated, gin.H{"message": "Review created"})
 	}
-
-	c.JSON(http.StatusCreated, gin.H{"message": "Review created"})
 }
 
 func (h *Handler) GetReviews(c *gin.Context) {
@@ -133,107 +129,48 @@ func (h *Handler) SubmitGrades(c *gin.Context) {
 		return
 	}
 
-	results := make([]*types.GradeResult, 0, len(req.Grades))
-	for _, entry := range req.Grades {
-		results = append(results, h.applyGrade(c.Request.Context(), caller, entry))
+	outcomes := h.Grades.ApplyBatch(c.Request.Context(), caller, req.Grades)
+	results := make([]*types.GradeResult, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		results = append(results, &types.GradeResult{
+			CardId:   outcome.CardID,
+			Accepted: outcome.Outcome.Accepted(),
+			Reason:   gradeReason(outcome.Outcome),
+		})
 	}
 
 	c.JSON(http.StatusOK, &types.GradeBatchResponse{Results: results})
 }
 
-// applyGrade stores one Grade the device scheduled, or says why it could not.
-// Every refusal is this entry's alone.
-func (h *Handler) applyGrade(ctx context.Context, caller int64, entry *types.GradeEntry) *types.GradeResult {
-	result := &types.GradeResult{CardId: entry.CardId}
-
-	grade, err := parseGrade(entry)
-	if err != nil {
-		result.Reason = err.Error()
-		return result
+// gradeReason is the wire's word for an outcome. These strings are frozen: a
+// device tells a replay from a refusal by them.
+func gradeReason(outcome reviews.Outcome) string {
+	switch outcome {
+	case reviews.Replay:
+		return "already recorded; the later Grade stands"
+	case reviews.NoSchedule:
+		return "no Review schedule"
+	case reviews.InvalidGrade:
+		return "invalid Grade"
+	case reviews.InvalidInterval:
+		return "invalid Interval"
+	case reviews.InvalidEfactor:
+		return "invalid Efactor"
+	case reviews.InvalidRepetitions:
+		return "invalid repetitions"
+	case reviews.InvalidAnsweredAt:
+		return "invalid answeredAt"
+	case reviews.InvalidNextReviewAt:
+		return "invalid nextReviewAt"
+	case reviews.UnknownCard:
+		return "unknown Card"
+	case reviews.NoAccess:
+		return "no access to this Deck"
+	case reviews.StoreFailed:
+		return "could not store the Grade"
+	default:
+		return ""
 	}
-
-	card, err := h.DB.GetCard(ctx, int64(entry.CardId))
-	if err != nil {
-		result.Reason = "unknown Card"
-		return result
-	}
-
-	// A Grade is only stored on a Deck the learner may read: a revoked DeckShare
-	// leaves the Grade refused, and the device keeps it for a later Sync.
-	if _, err := h.deckAccess(ctx, card.DeckID, caller); err != nil {
-		result.Reason = "no access to this Deck"
-		return result
-	}
-
-	stored, err := h.DB.ApplyGrade(ctx, db.ApplyGradeParams{
-		UserID:         caller,
-		CardID:         int64(entry.CardId),
-		Efactor:        grade.efactor,
-		Interval:       grade.interval,
-		Repetitions:    grade.repetitions,
-		LastReviewedAt: pgtype.Timestamptz{Time: grade.answeredAt, Valid: true},
-		NextReviewAt:   pgtype.Timestamptz{Time: grade.nextReviewAt, Valid: true},
-	})
-	if err != nil {
-		log.Printf("[WARN] Grade: failed to store a Grade for Card %d: %v", entry.CardId, err)
-		result.Reason = "could not store the Grade"
-		return result
-	}
-
-	// A Grade answered no later than the one already stored is a replay: it is
-	// accepted, so the device can drop it, and it changes nothing.
-	result.Accepted = true
-	if stored == 0 {
-		result.Reason = "already recorded; the later Grade stands"
-	}
-
-	return result
-}
-
-// scheduledGrade is a Grade entry read into the shapes the store needs: the
-// Review schedule the device computed, and the two moments it carries.
-type scheduledGrade struct {
-	interval     int32
-	efactor      float64
-	repetitions  int32
-	answeredAt   time.Time
-	nextReviewAt time.Time
-}
-
-// parseGrade reads a Grade entry, refusing anything the backend could not store
-// exactly as given.
-func parseGrade(entry *types.GradeEntry) (scheduledGrade, error) {
-	schedule := entry.Schedule
-	switch {
-	case schedule == nil:
-		return scheduledGrade{}, errors.New("no Review schedule")
-	case entry.Grade < 1 || entry.Grade > 4:
-		return scheduledGrade{}, errors.New("invalid Grade")
-	case schedule.Interval < 0:
-		return scheduledGrade{}, errors.New("invalid Interval")
-	case schedule.Efactor <= 0:
-		return scheduledGrade{}, errors.New("invalid Efactor")
-	case schedule.Repetitions < 0:
-		return scheduledGrade{}, errors.New("invalid repetitions")
-	}
-
-	answeredAt, err := time.Parse(time.RFC3339, entry.AnsweredAt)
-	if err != nil {
-		return scheduledGrade{}, errors.New("invalid answeredAt")
-	}
-
-	nextReviewAt, err := time.Parse(time.RFC3339, schedule.NextReviewAt)
-	if err != nil {
-		return scheduledGrade{}, errors.New("invalid nextReviewAt")
-	}
-
-	return scheduledGrade{
-		interval:     schedule.Interval,
-		efactor:      schedule.Efactor,
-		repetitions:  schedule.Repetitions,
-		answeredAt:   answeredAt,
-		nextReviewAt: nextReviewAt,
-	}, nil
 }
 
 // UpdateReview schedules a Grade here, the way this backend did before the
@@ -276,70 +213,25 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 		return
 	}
 
-	// The Card's Deck decides who may study it, so the Card is read before any
-	// Review is touched: a Grade on a Deck the caller cannot read is refused, and
-	// creates nothing.
-	card, err := h.Cards.ByID(c.Request.Context(), intUserID, intId)
+	// The Card's Deck decides who may study it: the writer reads the Card and
+	// asks the same gate every Grade write asks before any Review is touched.
+	err = h.Grades.ApplyLegacy(c.Request.Context(), intUserID, intId, grade)
 	switch {
-	case errors.Is(err, cards.ErrNoSuchCard):
+	case errors.Is(err, reviews.ErrUnknownCard):
 		respondWithError(c, http.StatusNotFound, "Card not found", err)
 		return
-	case errors.Is(err, cards.ErrSchedules):
-		respondWithError(c, http.StatusInternalServerError, "Failed to read the Review schedule", err)
+	case errors.Is(err, decks.ErrNoSuchDeck), errors.Is(err, reviews.ErrNoAccess):
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access to this private deck is restricted"})
 		return
-	case err != nil:
-		log.Printf("[WARN] Review: failed to get Card: %v", err)
-		respondWithError(c, http.StatusInternalServerError, "Failed to get card", err)
-		return
-	}
-
-	if _, ok := h.requireReadableDeck(c, card.DeckID, intUserID); !ok {
-		return
-	}
-
-	// The stored Review is the state scheduling continues from. Only a Review
-	// that is not there is created; any other read failure fails the request,
-	// since starting a fresh schedule would hide the database's answer.
-	review, err := h.DB.GetUserCard(c.Request.Context(), db.GetUserCardParams{
-		UserID: intUserID,
-		CardID: intId,
-	})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		review, err = h.DB.CreateUserCard(c.Request.Context(), db.CreateUserCardParams{
-			UserID: intUserID,
-			CardID: intId,
-		})
-		if err != nil {
-			log.Printf("[WARN] Review: failed to initialize UserCard: %v", err)
-			respondWithError(c, http.StatusInternalServerError, "Failed to get UserCard", err)
-			return
-		}
-	case err != nil:
-		log.Printf("[WARN] Review: failed to get UserCard: %v", err)
+	case errors.Is(err, reviews.ErrReadReview), errors.Is(err, reviews.ErrCreateReview):
 		respondWithError(c, http.StatusInternalServerError, "Failed to get UserCard", err)
 		return
-	}
-
-	now := time.Now()
-	next := scheduling.Next(scheduling.State{
-		Interval:    review.Interval,
-		Efactor:     review.Efactor,
-		Repetitions: review.Repetitions,
-	}, grade, now)
-
-	err = h.DB.UpdateUserCard(c.Request.Context(), db.UpdateUserCardParams{
-		UserID:         intUserID,
-		CardID:         intId,
-		Efactor:        next.Efactor,
-		Interval:       next.Interval,
-		Repetitions:    next.Repetitions,
-		LastReviewedAt: pgtype.Timestamptz{Time: now, Valid: true},
-		NextReviewAt:   pgtype.Timestamptz{Time: next.NextReviewAt, Valid: true},
-	})
-	if err != nil {
-		log.Printf("[WARN] Review: failed to update UserCard: %v", err)
+	case errors.Is(err, reviews.ErrStoreReview):
 		respondWithError(c, http.StatusInternalServerError, "Failed to update UserCard", err)
+		return
+	case err != nil:
+		log.Printf("[WARN] Review: failed to get the Card: %v", err)
+		respondWithError(c, http.StatusInternalServerError, "Failed to get card", err)
 		return
 	}
 

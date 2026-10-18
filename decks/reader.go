@@ -19,6 +19,7 @@ import (
 	"github.com/Fankhauserli/voabkr-backend/cache"
 	"github.com/Fankhauserli/voabkr-backend/sql/db"
 	"github.com/Fankhauserli/voabkr-backend/types"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -91,8 +92,12 @@ func (s Standing) Body() *types.Deck { return bodyOf(s.Deck, s.Role) }
 // not there is ErrNoSuchDeck.
 func (r *Reader) StandingOn(ctx context.Context, deckID, caller int64) (Standing, error) {
 	deck, err := r.db.GetDeck(ctx, deckID)
-	if err != nil {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
 		return Standing{}, fmt.Errorf("%w: %v", ErrNoSuchDeck, err)
+	case err != nil:
+		// A database that cannot answer is not a Deck that is not there.
+		return Standing{}, err
 	}
 
 	var share *db.DeckShare

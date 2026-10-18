@@ -59,8 +59,11 @@ func (h *Handler) requireReadableDeck(c *gin.Context, deckID int64, caller int64
 	case errors.Is(err, decks.ErrNoSuchDeck):
 		respondWithError(c, http.StatusNotFound, "Deck not found", err)
 		return decks.Standing{}, false
-	case err != nil:
+	case errors.Is(err, errDeckNotReadable):
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access to this private deck is restricted"})
+		return decks.Standing{}, false
+	case err != nil:
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Deck", err)
 		return decks.Standing{}, false
 	}
 
@@ -76,10 +79,13 @@ func (h *Handler) requireReadableDeck(c *gin.Context, deckID int64, caller int64
 // Every edit of a Deck or a Card goes through here, so the rule is applied in
 // one place rather than re-spelled per handler.
 func (h *Handler) requireDeckEdit(c *gin.Context, deckID int64, caller int64, refusal string) (decks.Standing, bool) {
-	// The only way resolving a standing fails is a Deck that isn't there.
 	standing, err := h.Decks.StandingOn(c.Request.Context(), deckID, caller)
-	if err != nil {
+	switch {
+	case errors.Is(err, decks.ErrNoSuchDeck):
 		respondWithError(c, http.StatusNotFound, "Deck not found", err)
+		return decks.Standing{}, false
+	case err != nil:
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Deck", err)
 		return decks.Standing{}, false
 	}
 
@@ -99,10 +105,13 @@ func (h *Handler) requireDeckEdit(c *gin.Context, deckID int64, caller int64, re
 // Ownership is asked of access/, which fails closed: a System deck has no owner
 // for anyone to be, so it refuses every one of these acts.
 func (h *Handler) requireDeckOwner(c *gin.Context, deckID, caller int64, refusal string) (decks.Standing, bool) {
-	// The only way resolving a standing fails is a Deck that isn't there.
 	standing, err := h.Decks.StandingOn(c.Request.Context(), deckID, caller)
-	if err != nil {
+	switch {
+	case errors.Is(err, decks.ErrNoSuchDeck):
 		respondWithError(c, http.StatusNotFound, "Deck not found", err)
+		return decks.Standing{}, false
+	case err != nil:
+		respondWithError(c, http.StatusInternalServerError, "Failed to read the Deck", err)
 		return decks.Standing{}, false
 	}
 

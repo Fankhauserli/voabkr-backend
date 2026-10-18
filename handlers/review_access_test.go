@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"slices"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
+	"github.com/Fankhauserli/voabkr-backend/sql/db"
 )
 
 const reviewsRoute = "/api/v1/reviews/"
@@ -102,6 +104,42 @@ func TestGetReviewsQueueDropsCardsOfUnreadableDecks(t *testing.T) {
 	if got := cardWords(t, w.Body.Bytes()); len(got) != 0 {
 		t.Fatalf("expected the private deck's card to stay out of the queue, got %v", got)
 	}
+}
+
+// Enrolling a Card applies the same Deck-access gate as every Grade write: an
+// unreadable Deck is refused, and stores no Review.
+func TestCreateReviewForPrivateDeckForbiddenForOutsider(t *testing.T) {
+	h := newTestHandler(t)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	outsider := dbtest.SeedUser(t, "outsider@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "비공개", "private")
+
+	w := post(t, h.CreateReview, outsider, reviewsRoute, reviewsRoute, fmt.Sprintf(`{"cardID":%d}`, cardID))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403 for an outsider, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, err := dbtest.Queries(t).GetUserCard(context.Background(), db.GetUserCardParams{
+		UserID: outsider, CardID: cardID,
+	}); err == nil {
+		t.Fatal("expected no Review for an unreadable Deck")
+	}
+}
+
+// Enrolling a Card on a Deck the learner may read stores the Review.
+func TestCreateReviewStoresAReviewForAReadableDeck(t *testing.T) {
+	h := newTestHandler(t)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+
+	w := post(t, h.CreateReview, learner, reviewsRoute, reviewsRoute, fmt.Sprintf(`{"cardID":%d}`, cardID))
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+	storedReview(t, learner, cardID)
 }
 
 // A study session filtered to one Deck offers only that Deck's Cards, even when
