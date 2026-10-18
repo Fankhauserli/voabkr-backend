@@ -1,7 +1,6 @@
 package handlers_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,16 +20,18 @@ func cardsPath(deckID int64) string {
 }
 
 // An anonymous caller asking for a private deck's Cards is refused, and a warm
-// cards:deck:<id> entry does not answer for the deck.
+// entry does not answer for the deck: the Deck's standing is settled before the
+// Cards are read.
 func TestGetCardsOfPrivateDeckForbiddenForAnonymousCaller(t *testing.T) {
 	h := newTestHandlerWithCache(t)
 	owner := dbtest.SeedUser(t, "owner@example.com")
 	deckID := dbtest.SeedDeck(t, owner, false)
 	dbtest.SeedCard(t, deckID, "나무", "tree")
 
-	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("cards:deck:%d", deckID), &types.CardList{
-		Cards: []*types.Card{{Id: 1, DeckId: uint32(deckID), KoreanWord: "나무", EnglishWord: "tree"}},
-	}, 5*time.Minute)
+	// The owner's read warms the Deck's entry.
+	if w := get(t, h.GetCards, owner, cardsRoute, cardsPath(deckID)); w.Code != http.StatusOK {
+		t.Fatalf("failed to warm the Deck's Cards: %d: %s", w.Code, w.Body.String())
+	}
 
 	w := get(t, h.GetCards, access.Anonymous, cardsRoute, cardsPath(deckID))
 
@@ -66,25 +67,23 @@ func TestGetCardsOfPrivateDeckReadableByOwner(t *testing.T) {
 	}
 }
 
-// A warm cards:deck:<id> entry still answers for a caller with access to the
-// Deck — the cache is gated, not gone. The Card in it has no row in the database,
-// so its words can only have come from the entry.
+// A warm entry still answers for a caller with access to the Deck — the cache
+// is gated, not gone. The entry holds the words the first read wrote, not the
+// change that went around the handler.
 func TestGetCardsOfDeckServedFromWarmCache(t *testing.T) {
 	h := newTestHandlerWithCache(t)
 	owner := dbtest.SeedUser(t, "owner@example.com")
 	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
-	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("cards:deck:%d", deckID), &types.CardList{
-		Cards: []*types.Card{{Id: 1, DeckId: uint32(deckID), KoreanWord: "캐시", EnglishWord: "cache"}},
-	}, 5*time.Minute)
-
-	w := get(t, h.GetCards, owner, cardsRoute, cardsPath(deckID))
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200 for the owner, got %d: %s", w.Code, w.Body.String())
+	if got := deckCardWords(t, h, owner, deckID); !slices.Equal(got, []string{"나무"}) {
+		t.Fatalf("expected the seeded Card in the listing, got %v", got)
 	}
-	if got := cardWords(t, w.Body.Bytes()); !slices.Equal(got, []string{"캐시"}) {
-		t.Fatalf("expected the cached card, got %v", got)
+
+	renameCardDirectly(t, h.DB, cardID, deckID, "숲", "forest")
+
+	if got := deckCardWords(t, h, owner, deckID); !slices.Equal(got, []string{"나무"}) {
+		t.Fatalf("expected the warm entry's Card, got %v", got)
 	}
 }
 
@@ -100,11 +99,12 @@ func TestGetCardsFromWarmCacheCarriesTheCallersSchedule(t *testing.T) {
 	nextReviewAt := time.Now().Add(24 * time.Hour).Truncate(time.Second)
 	dbtest.SeedScheduledReview(t, learner, cardID, nextReviewAt)
 
-	// The entry is the one the Deck's Cards are stored under, and the words in it
-	// differ from the row's, so the response shows where the Card came from.
-	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("cards:deck:%d", deckID), &types.CardList{
-		Cards: []*types.Card{{Id: uint32(cardID), DeckId: uint32(deckID), KoreanWord: "캐시", EnglishWord: "cache"}},
-	}, 5*time.Minute)
+	// The first read warms the entry with the Card as it is now.
+	if got := deckCardWords(t, h, learner, deckID); !slices.Equal(got, []string{"배운"}) {
+		t.Fatalf("expected the studied Card in the listing, got %v", got)
+	}
+
+	renameCardDirectly(t, h.DB, cardID, deckID, "바뀐", "changed")
 
 	w := get(t, h.GetCards, learner, cardsRoute, cardsPath(deckID))
 
@@ -116,7 +116,7 @@ func TestGetCardsFromWarmCacheCarriesTheCallersSchedule(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cards); err != nil {
 		t.Fatalf("failed to parse response JSON: %v", err)
 	}
-	if len(cards) != 1 || cards[0].KoreanWord != "캐시" {
+	if len(cards) != 1 || cards[0].KoreanWord != "배운" {
 		t.Fatalf("expected the Card the entry holds, got %s", w.Body.String())
 	}
 	if cards[0].ReviewSchedule == nil {
@@ -167,32 +167,6 @@ func TestGetCardsWithoutDeckFilterListsOnlyReadableDecks(t *testing.T) {
 	}
 }
 
-// An anonymous caller's listing is exactly the Cards of the public Decks the
-// instance holds, whatever sits under cards:all: a warm entry — the shape the
-// vulnerable handler wrote, another learner's private Cards included — neither
-// reaches the listing nor empties it.
-func TestGetCardsWithoutDeckFilterIgnoresWarmCacheEntry(t *testing.T) {
-	h := newTestHandlerWithCache(t)
-	owner := dbtest.SeedUser(t, "owner@example.com")
-	publicDeck := dbtest.SeedDeck(t, owner, true)
-	dbtest.SeedCard(t, publicDeck, "공개", "public")
-	privateDeck := dbtest.SeedDeck(t, owner, false)
-	dbtest.SeedCard(t, privateDeck, "비공개", "private")
-
-	_ = h.Cache.SetProto(context.Background(), "cards:all", &types.CardList{
-		Cards: []*types.Card{{Id: 1, DeckId: uint32(privateDeck), KoreanWord: "비공개", EnglishWord: "private"}},
-	}, 5*time.Minute)
-
-	w := get(t, h.GetCards, access.Anonymous, cardsRoute, "/api/v1/cards/")
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200 for an anonymous caller, got %d: %s", w.Code, w.Body.String())
-	}
-	if got := cardWords(t, w.Body.Bytes()); !slices.Equal(got, []string{"공개"}) {
-		t.Fatalf("expected only the public Deck's Cards, got %v", got)
-	}
-}
-
 func cardWords(t *testing.T, body []byte) []string {
 	t.Helper()
 
@@ -214,20 +188,17 @@ func cardPath(cardID int64) string {
 	return fmt.Sprintf("/api/v1/cards/%d", cardID)
 }
 
-// A Card of a private deck is not readable by guessing its id, even when a
-// card:<id> entry is warm.
+// A Card of a private deck is not readable by guessing its id, even after a
+// caller who may read the Deck asked for it.
 func TestGetCardByIDInPrivateDeckForbiddenForAnonymousCaller(t *testing.T) {
 	h := newTestHandlerWithCache(t)
 	owner := dbtest.SeedUser(t, "owner@example.com")
 	deckID := dbtest.SeedDeck(t, owner, false)
 	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
 
-	_ = h.Cache.SetProto(context.Background(), fmt.Sprintf("card:%d", cardID), &types.Card{
-		Id:          uint32(cardID),
-		DeckId:      uint32(deckID),
-		KoreanWord:  "나무",
-		EnglishWord: "tree",
-	}, 5*time.Minute)
+	if w := get(t, h.GetCardByID, owner, cardRoute, cardPath(cardID)); w.Code != http.StatusOK {
+		t.Fatalf("failed to read the private deck's Card as its owner: %d: %s", w.Code, w.Body.String())
+	}
 
 	w := get(t, h.GetCardByID, access.Anonymous, cardRoute, cardPath(cardID))
 

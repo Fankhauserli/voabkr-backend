@@ -1,56 +1,50 @@
 package handlers_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/Fankhauserli/voabkr-backend/cache"
+	"github.com/Fankhauserli/voabkr-backend/access"
 	"github.com/Fankhauserli/voabkr-backend/handlers"
+	"github.com/Fankhauserli/voabkr-backend/internal/dbtest"
 	"github.com/Fankhauserli/voabkr-backend/types"
 )
 
+// A share link is answered from the entry its first read wrote: a rename that
+// went around the handler is not served until a write clears the entry.
 func TestGetSharedDeckByTokenCacheHit(t *testing.T) {
-	c, err := cache.NewTwoLevelCache(cache.Config{
-		EnableLocalCache: true,
-		DefaultTTL:       5 * time.Minute,
-	})
-	if err != nil {
-		t.Fatalf("failed to create cache: %v", err)
+	h := newTestHandlerWithCache(t)
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	token := readableDeckBody(t, h, owner, deckID).ShareToken
+
+	if got := sharedDeckThroughLink(t, h, token); got.Id != uint32(deckID) || got.Name != "Seeded Deck" || got.ShareToken != token {
+		t.Fatalf("expected the seeded Deck through the link, got %+v", got)
 	}
-	defer c.Close()
 
-	ctx := context.Background()
-	_ = c.SetProto(ctx, "deck:shared:tok_12345", &types.Deck{
-		Id:         88,
-		Name:       "TOPIK II Advanced Vocab",
-		Type:       "vocabulary",
-		IsPublic:   false,
-		ShareToken: "tok_12345",
-	}, 5*time.Minute)
+	renameDeckDirectly(t, h.DB, deckID, "Renamed")
 
-	h := handlers.NewHandler(nil, c)
-	r := setupTestRouter()
-	r.GET("/api/v1/decks/shared/:token", h.GetSharedDeckByToken)
+	if got := sharedDeckThroughLink(t, h, token); got.Id != uint32(deckID) || got.Name != "Seeded Deck" || got.ShareToken != token {
+		t.Fatalf("expected the entry to answer the second read, got %+v", got)
+	}
+}
 
-	req := httptest.NewRequest("GET", "/api/v1/decks/shared/tok_12345", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+// sharedDeckThroughLink reads the Deck a share link serves, as its holder does.
+func sharedDeckThroughLink(t *testing.T, h *handlers.Handler, token string) *types.Deck {
+	t.Helper()
 
+	w := get(t, h.GetSharedDeckByToken, access.Anonymous, sharedDeckRoute, sharedDeckPath(token))
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("failed to read the shared deck: %d: %s", w.Code, w.Body.String())
 	}
 
-	var result types.Deck
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to parse response JSON: %v", err)
+	var deck types.Deck
+	if err := json.Unmarshal(w.Body.Bytes(), &deck); err != nil {
+		t.Fatalf("failed to parse the shared deck: %v", err)
 	}
-	if result.Id != 88 || result.Name != "TOPIK II Advanced Vocab" || result.ShareToken != "tok_12345" {
-		t.Fatalf("unexpected shared deck response: %+v", result)
-	}
+	return &deck
 }
 
 func TestDeleteAccountUnauthorized(t *testing.T) {

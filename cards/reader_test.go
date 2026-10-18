@@ -2,6 +2,8 @@ package cards_test
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,6 +266,183 @@ func TestFromRowsCarriesTheCallersSchedules(t *testing.T) {
 	}
 	if len(guest) != 1 || guest[0].ReviewSchedule != nil {
 		t.Fatalf("expected a guest's row to carry no Review schedule, got %+v", guest)
+	}
+}
+
+// A Deck's Cards are answered from the entry the first read wrote: a change to
+// the row that no write through the Reader announced waits for the entry to be
+// cleared, which is what makes the cache a cache.
+func TestByDeckServesAWarmEntry(t *testing.T) {
+	queries := dbtest.Setup(t)
+	reader := cards.NewReader(queries, newStoredCache())
+
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+
+	if got := deckWords(t, reader, owner, deckID); !slices.Equal(got, []string{"나무"}) {
+		t.Fatalf("expected the seeded Card in the listing, got %v", got)
+	}
+
+	renameCard(t, queries, cardID, deckID, "숲", "forest")
+
+	if got := deckWords(t, reader, owner, deckID); !slices.Equal(got, []string{"나무"}) {
+		t.Fatalf("expected the warm entry to answer, got %v", got)
+	}
+}
+
+// Invalidate clears the entry holding the Deck's Cards: the changed Card answers
+// on the next read rather than at the entry's expiry.
+func TestInvalidateClearsTheDecksCards(t *testing.T) {
+	queries := dbtest.Setup(t)
+	reader := cards.NewReader(queries, newStoredCache())
+	ctx := context.Background()
+
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+
+	if got := deckWords(t, reader, owner, deckID); !slices.Equal(got, []string{"나무"}) {
+		t.Fatalf("expected the seeded Card in the listing, got %v", got)
+	}
+
+	renameCard(t, queries, cardID, deckID, "숲", "forest")
+	reader.Invalidate(ctx, deckID)
+
+	if got := deckWords(t, reader, owner, deckID); !slices.Equal(got, []string{"숲"}) {
+		t.Fatalf("expected the changed Card after invalidation, got %v", got)
+	}
+}
+
+// A paged read is held under a window of its own, and Invalidate clears that too.
+func TestInvalidateClearsThePagedWindows(t *testing.T) {
+	queries := dbtest.Setup(t)
+	reader := cards.NewReader(queries, newStoredCache())
+	ctx := context.Background()
+
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+	page := cards.Page{Limit: 1, Offset: 0, Paged: true}
+
+	got, err := reader.ByDeck(ctx, owner, deckID, page)
+	if err != nil {
+		t.Fatalf("failed to read the window: %v", err)
+	}
+	if words := wordsOf(got); !slices.Equal(words, []string{"나무"}) {
+		t.Fatalf("expected the seeded Card in the window, got %v", words)
+	}
+
+	renameCard(t, queries, cardID, deckID, "숲", "forest")
+
+	got, err = reader.ByDeck(ctx, owner, deckID, page)
+	if err != nil {
+		t.Fatalf("failed to read the warm window: %v", err)
+	}
+	if words := wordsOf(got); !slices.Equal(words, []string{"나무"}) {
+		t.Fatalf("expected the warm entry to answer, got %v", words)
+	}
+
+	reader.Invalidate(ctx, deckID)
+
+	got, err = reader.ByDeck(ctx, owner, deckID, page)
+	if err != nil {
+		t.Fatalf("failed to read the window after invalidation: %v", err)
+	}
+	if words := wordsOf(got); !slices.Equal(words, []string{"숲"}) {
+		t.Fatalf("expected the changed Card after invalidation, got %v", words)
+	}
+}
+
+// A legacy cross-Deck listing entry is not a listing: ForCaller answers from the
+// readable-Deck rule, so a warm cards:all neither answers nor widens it.
+func TestForCallerIgnoresALegacyListingEntry(t *testing.T) {
+	queries := dbtest.Setup(t)
+	stored := newStoredCache()
+	reader := cards.NewReader(queries, stored)
+	ctx := context.Background()
+
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	publicDeck := dbtest.SeedDeck(t, owner, true)
+	privateDeck := dbtest.SeedDeck(t, owner, false)
+	dbtest.SeedCard(t, publicDeck, "공개", "public")
+	privateCard := dbtest.SeedCard(t, privateDeck, "비공개", "private")
+
+	_ = stored.SetProto(ctx, "cards:all", &types.CardList{Cards: []*types.Card{{
+		Id:          uint32(privateCard),
+		DeckId:      uint32(privateDeck),
+		KoreanWord:  "비공개",
+		EnglishWord: "private",
+	}}}, time.Minute)
+
+	got, err := reader.ForCaller(ctx, access.Anonymous, cards.Page{})
+	if err != nil {
+		t.Fatalf("failed to read the caller's Cards: %v", err)
+	}
+	if words := wordsOf(got); !slices.Equal(words, []string{"공개"}) {
+		t.Fatalf("expected the public Deck's Card and nothing else, got %v", words)
+	}
+}
+
+// A legacy per-Card entry is not a Card read: ByID answers from the row.
+func TestByIDIgnoresALegacyCardEntry(t *testing.T) {
+	queries := dbtest.Setup(t)
+	stored := newStoredCache()
+	reader := cards.NewReader(queries, stored)
+	ctx := context.Background()
+
+	owner := dbtest.SeedUser(t, "owner@example.com")
+	deckID := dbtest.SeedDeck(t, owner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+
+	_ = stored.SetProto(ctx, fmt.Sprintf("card:%d", cardID), &types.Card{
+		Id:          uint32(cardID),
+		DeckId:      uint32(deckID),
+		KoreanWord:  "캐시",
+		EnglishWord: "cache",
+	}, time.Minute)
+
+	got, err := reader.ByID(ctx, owner, cardID)
+	if err != nil {
+		t.Fatalf("failed to read the Card: %v", err)
+	}
+	if got.Body.KoreanWord != "나무" {
+		t.Fatalf("expected the row's Card, got %q", got.Body.KoreanWord)
+	}
+}
+
+// deckWords returns the Korean words a Deck's listing answers with.
+func deckWords(t *testing.T, reader *cards.Reader, caller, deckID int64) []string {
+	t.Helper()
+
+	got, err := reader.ByDeck(context.Background(), caller, deckID, cards.Page{})
+	if err != nil {
+		t.Fatalf("failed to read the Deck's Cards: %v", err)
+	}
+	return wordsOf(got)
+}
+
+// wordsOf returns the Korean words a listing carries.
+func wordsOf(cards []*types.Card) []string {
+	words := make([]string, 0, len(cards))
+	for _, card := range cards {
+		words = append(words, card.KoreanWord)
+	}
+	return words
+}
+
+// renameCard changes the Card's words through the database, leaving the cache
+// alone — a write the Reader did not announce.
+func renameCard(t *testing.T, queries *db.Queries, cardID, deckID int64, korean, english string) {
+	t.Helper()
+
+	if err := queries.UpdateCard(context.Background(), db.UpdateCardParams{
+		ID:          cardID,
+		DeckID:      deckID,
+		KoreanWord:  korean,
+		EnglishWord: english,
+	}); err != nil {
+		t.Fatalf("failed to rename the Card: %v", err)
 	}
 }
 
