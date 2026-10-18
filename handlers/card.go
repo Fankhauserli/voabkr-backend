@@ -116,6 +116,8 @@ func (h *Handler) CreateCards(c *gin.Context) {
 	}
 
 	h.Cards.Invalidate(c.Request.Context(), int64(req.DeckId))
+	// The Deck body carries its Card total, so the entries holding it go too.
+	h.Decks.Invalidate(c.Request.Context(), int64(req.DeckId))
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Card created"})
 }
@@ -208,9 +210,12 @@ func (h *Handler) UpdateCard(c *gin.Context) {
 	}
 
 	// The Card it was in, and — when the request moved it — the Deck it landed in.
+	// The Deck bodies carry Card totals, so the entries holding them go too.
 	h.Cards.Invalidate(c.Request.Context(), card.DeckID)
+	h.Decks.Invalidate(c.Request.Context(), card.DeckID)
 	if int64(req.DeckId) != card.DeckID {
 		h.Cards.Invalidate(c.Request.Context(), int64(req.DeckId))
+		h.Decks.Invalidate(c.Request.Context(), int64(req.DeckId))
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Card updated"})
@@ -230,6 +235,8 @@ func (h *Handler) DeleteCard(c *gin.Context) {
 	}
 
 	h.Cards.Invalidate(c.Request.Context(), card.DeckID)
+	// The Deck body carries its Card total, so the entries holding it go too.
+	h.Decks.Invalidate(c.Request.Context(), card.DeckID)
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Card deleted"})
 }

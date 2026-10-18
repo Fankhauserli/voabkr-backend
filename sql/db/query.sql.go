@@ -598,6 +598,42 @@ func (q *Queries) GetDeckByShareToken(ctx context.Context, shareToken pgtype.Tex
 	return i, err
 }
 
+const getDeckCounts = `-- name: GetDeckCounts :one
+SELECT
+  (
+    SELECT COUNT(*) FROM cards c
+    WHERE c.deck_id = $1
+      AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+  )::bigint AS card_count,
+  (
+    SELECT COUNT(*) FROM user_cards uc
+    JOIN cards c ON c.id = uc.card_id
+    WHERE c.deck_id = $1
+      AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+      AND uc.user_id = $2::bigint
+      AND uc.next_review_at <= NOW()
+  )::bigint AS due_count
+`
+
+type GetDeckCountsParams struct {
+	DeckID int64
+	Caller pgtype.Int8
+}
+
+type GetDeckCountsRow struct {
+	CardCount int64
+	DueCount  int64
+}
+
+// The counts a Deck body carries: its live Cards, and the caller's stored
+// Reviews of them that are due now. A NULL caller has no Reviews to count.
+func (q *Queries) GetDeckCounts(ctx context.Context, arg GetDeckCountsParams) (GetDeckCountsRow, error) {
+	row := q.db.QueryRow(ctx, getDeckCounts, arg.DeckID, arg.Caller)
+	var i GetDeckCountsRow
+	err := row.Scan(&i.CardCount, &i.DueCount)
+	return i, err
+}
+
 const getDeckShare = `-- name: GetDeckShare :one
 SELECT id, deck_id, user_id, invited_email, permission, created_at, updated_at FROM deck_shares
 WHERE deck_id = $1 AND user_id = $2
@@ -1092,7 +1128,20 @@ func (q *Queries) ListDecks(ctx context.Context) ([]Deck, error) {
 }
 
 const listReadableDecks = `-- name: ListReadableDecks :many
-SELECT d.id, d.name, d.type, d.created_at, d.updated_at, d.deleted_at, d.owner_id, d.is_public, d.share_token, r.access_role::text AS access_role
+SELECT d.id, d.name, d.type, d.created_at, d.updated_at, d.deleted_at, d.owner_id, d.is_public, d.share_token, r.access_role::text AS access_role,
+       (
+         SELECT COUNT(*) FROM cards c
+         WHERE c.deck_id = d.id
+           AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+       )::bigint AS card_count,
+       (
+         SELECT COUNT(*) FROM user_cards uc
+         JOIN cards c ON c.id = uc.card_id
+         WHERE c.deck_id = d.id
+           AND (c.deleted_at > NOW() OR c.deleted_at IS NULL)
+           AND uc.user_id = $1::bigint
+           AND uc.next_review_at <= NOW()
+       )::bigint AS due_count
 FROM decks d
 JOIN readable_decks($1::bigint) r ON r.id = d.id
 ORDER BY d.name
@@ -1109,6 +1158,8 @@ type ListReadableDecksRow struct {
 	IsPublic   bool
 	ShareToken pgtype.Text
 	AccessRole string
+	CardCount  int64
+	DueCount   int64
 }
 
 // The Deck listing and every Deck-scoped read take their rows and roles from the
@@ -1135,6 +1186,8 @@ func (q *Queries) ListReadableDecks(ctx context.Context, caller pgtype.Int8) ([]
 			&i.IsPublic,
 			&i.ShareToken,
 			&i.AccessRole,
+			&i.CardCount,
+			&i.DueCount,
 		); err != nil {
 			return nil, err
 		}

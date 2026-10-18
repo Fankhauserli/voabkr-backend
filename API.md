@@ -335,7 +335,9 @@ Every Deck object in the deck listing and in `GET /api/v1/decks/:id` carries the
   "ownerId": 42,
   "isPublic": true,
   "shareToken": "sec_7f3c...",
-  "userAccessRole": "owner"
+  "userAccessRole": "owner",
+  "cardCount": 150,
+  "dueCount": 12
 }
 ```
 
@@ -348,6 +350,8 @@ Every Deck object in the deck listing and in `GET /api/v1/decks/:id` carries the
 | `isPublic` | boolean | Whether the Deck is readable by anyone, signed in or not. |
 | `shareToken` | string | The Deck's share-link token, or `""` when none has been minted. |
 | `userAccessRole` | string | The caller's Access role on the Deck: `owner`, `edit`, `view`, or `public`. |
+| `cardCount` | number | How many live Cards the Deck holds. Deleted Cards are excluded. |
+| `dueCount` | number | How many of the caller's Reviews of this Deck's live Cards are Due now. It counts Due Cards, not New Cards, and is `0` for a caller with no session — including a share-link reader. |
 
 #### Deck request shape
 
@@ -373,7 +377,7 @@ The served field names are the contract. The protocol buffer's field name is acc
 Lists the Decks the caller may read.
 - **Auth**: Optional
 - **Responses**:
-  - `200 OK`: `[]Deck`. A caller with no session is answered the public Decks, each carrying `"userAccessRole": "public"`; a signed-in learner is answered the public Decks, their own, and the ones shared with them, each carrying the caller's own Access role.
+  - `200 OK`: `[]Deck`. A caller with no session is answered the public Decks, each carrying `"userAccessRole": "public"` and `"dueCount": 0`; a signed-in learner is answered the public Decks, their own, and the ones shared with them, each carrying the caller's own Access role and Due count.
   - `401 Unauthorized`: `{"error": "Unauthorized"}` — the session names a learner this instance cannot place.
   - `500 Internal Server Error`: `{"error": "Failed to retrieve decks"}`, or `{"error": "Failed to retrieve public decks"}` for a caller with no session.
 - **Example Request**:
@@ -390,7 +394,9 @@ Lists the Decks the caller may read.
       "ownerId": 42,
       "isPublic": true,
       "shareToken": "sec_7f3c...",
-      "userAccessRole": "public"
+      "userAccessRole": "public",
+      "cardCount": 150,
+      "dueCount": 0
     }
   ]
   ```
@@ -421,7 +427,7 @@ Retrieves a single deck by its ID.
 - **Auth**: Optional
 - **Path Parameter**: `:id` (integer)
 - **Responses**:
-  - `200 OK`: the [Deck shape](#deck-shape), carrying the caller's own Access role.
+  - `200 OK`: the [Deck shape](#deck-shape), carrying the caller's own Access role and Due count.
   - `400 Bad Request`: `{"error": "Invalid deck id parameter"}`
   - `403 Forbidden`: `{"error": "Access to this private deck is restricted"}` — the Deck is private and the caller may not read it
   - `404 Not Found`: `{"error": "Deck not found"}`
