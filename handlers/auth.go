@@ -101,15 +101,10 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	_, err = h.DB.CreateUserSettings(c.Request.Context(), createdUser.ID)
-	if err != nil {
-		log.Printf("[ERROR] Register: failed to create user settings for user %d (%s): %v", createdUser.ID, createdUser.Email, err)
-		respondWithError(c, http.StatusInternalServerError, "Failed to create user settings", err)
-		return
-	}
-
-	// The account exists once the rows are written. A token or delivery failure
-	// is logged and does not undo it: resend verification is the recovery path.
+	// The account exists once the user row is written; the settings row is
+	// created on the first settings read, by the module that owns it. A token or
+	// delivery failure is logged and does not undo the account: resend
+	// verification is the recovery path.
 	if token, tokenErr := h.issueVerificationToken(c, createdUser); tokenErr != nil {
 		log.Printf("[ERROR] Register: failed to issue a verification token for user %d (%s): %v", createdUser.ID, createdUser.Email, tokenErr)
 	} else if result := h.Mail.SendVerification(createdUser.Email, createdUser.Name, token, verificationTokenLifetime); result.Outcome == mail.Failed {
@@ -162,7 +157,7 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 		return
 	}
 
-	err = h.DB.UpdateUserEmailVerified(c.Request.Context(), verification.UserID)
+	err = h.Account.MarkEmailVerified(c.Request.Context(), verification.UserID)
 	if err != nil {
 		log.Printf("[ERROR] VerifyEmail: failed to update email verified for user %d: %v", verification.UserID, err)
 		respondWithError(c, http.StatusInternalServerError, "Failed to verify email", err)
