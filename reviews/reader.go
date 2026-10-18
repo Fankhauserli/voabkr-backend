@@ -1,12 +1,13 @@
-// Package reviews owns reading the Review queue: the Cards a learner is due to
-// study, optionally within one Deck or since a given moment. The caller asks for
-// their queue rather than assembling it from Card rows, and the Cards arrive
-// carrying their own Review schedules.
+// Package reviews owns the Review queue and every Grade write. The queue is the
+// Cards a learner is due to study, optionally within one Deck or since a given
+// moment; the caller asks for it rather than assembling it from Card rows, and
+// the Cards arrive carrying their own Review schedules.
 //
 // Which Cards a queue holds is decided in SQL: the due and since reads select
 // from the one readable-Decks rule, so a Deck the caller may not read — deleted
 // included — takes its Cards out of the queue. The optional Deck filter is part
-// of that read, not a pass over its answer.
+// of that read, not a pass over its answer. Every Grade write asks the same
+// readable-Deck gate and answers in typed outcomes.
 package reviews
 
 import (

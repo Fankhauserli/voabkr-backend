@@ -184,6 +184,85 @@ func TestSubmitGradesReplayIsANoOpAndTheLaterAnswerWins(t *testing.T) {
 	}
 }
 
+// The reasons a batch reports are the wire's frozen vocabulary: a device tells
+// a replay from a refusal, and one refusal from another, by these strings.
+func TestSubmitGradesKeepsTheFrozenReasonStrings(t *testing.T) {
+	h := newTestHandler(t)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	stranger := dbtest.SeedUser(t, "stranger@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "나무", "tree")
+	strangerDeck := dbtest.SeedDeck(t, stranger, false)
+	strangerCard := dbtest.SeedCard(t, strangerDeck, "남의", "someone else's")
+
+	answeredAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	nextReviewAt := answeredAt.Add(24 * time.Hour)
+
+	schedule := func(interval int, efactor float64, repetitions int, nextReviewAt string) string {
+		return fmt.Sprintf(`"schedule":{"interval":%d,"efactor":%g,"repetitions":%d,"nextReviewAt":%q}`,
+			interval, efactor, repetitions, nextReviewAt)
+	}
+	entry := func(cardID int64, grade int, answeredAt, schedule string) string {
+		if schedule == "" {
+			return fmt.Sprintf(`{"cardId":%d,"grade":%d,"answeredAt":%q}`, cardID, grade, answeredAt)
+		}
+		return fmt.Sprintf(`{"cardId":%d,"grade":%d,"answeredAt":%q,%s}`, cardID, grade, answeredAt, schedule)
+	}
+
+	valid := schedule(6, 2.5, 1, rfc3339(nextReviewAt))
+	answered := rfc3339(answeredAt)
+
+	refusals := []struct {
+		name   string
+		entry  string
+		reason string
+	}{
+		{"no schedule", entry(cardID, 3, answered, ""), "no Review schedule"},
+		{"invalid Grade", entry(cardID, 5, answered, valid), "invalid Grade"},
+		{"invalid Interval", entry(cardID, 3, answered, schedule(-1, 2.5, 1, rfc3339(nextReviewAt))), "invalid Interval"},
+		{"invalid Efactor", entry(cardID, 3, answered, schedule(6, 0, 1, rfc3339(nextReviewAt))), "invalid Efactor"},
+		{"invalid repetitions", entry(cardID, 3, answered, schedule(6, 2.5, -1, rfc3339(nextReviewAt))), "invalid repetitions"},
+		{"invalid answeredAt", entry(cardID, 3, "not a time", valid), "invalid answeredAt"},
+		{"invalid nextReviewAt", entry(cardID, 3, answered, schedule(6, 2.5, 1, "not a time")), "invalid nextReviewAt"},
+		{"unknown Card", entry(9999, 3, answered, valid), "unknown Card"},
+		{"no access", entry(strangerCard, 3, answered, valid), "no access to this Deck"},
+	}
+
+	entries := make([]string, 0, len(refusals))
+	for _, refusal := range refusals {
+		entries = append(entries, refusal.entry)
+	}
+
+	w := post(t, h.SubmitGrades, learner, gradesRoute, gradesRoute, gradeBody(entries...))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var batch batchResults
+	unmarshalBatch(t, w.Body.Bytes(), &batch)
+	if len(batch.Results) != len(refusals) {
+		t.Fatalf("expected a result per entry, got %s", w.Body.String())
+	}
+	for i, refusal := range refusals {
+		if batch.Results[i].Accepted || batch.Results[i].Reason != refusal.reason {
+			t.Fatalf("%s: expected the reason %q, got %+v", refusal.name, refusal.reason, batch.Results[i])
+		}
+	}
+
+	recorded := gradeBody(entry(cardID, 3, answered, valid))
+	w = post(t, h.SubmitGrades, learner, gradesRoute, gradesRoute, recorded)
+	unmarshalBatch(t, w.Body.Bytes(), &batch)
+	if !batch.Results[0].Accepted || batch.Results[0].Reason != "" {
+		t.Fatalf("expected a recorded Grade with no reason, got %+v", batch.Results[0])
+	}
+
+	w = post(t, h.SubmitGrades, learner, gradesRoute, gradesRoute, recorded)
+	unmarshalBatch(t, w.Body.Bytes(), &batch)
+	if !batch.Results[0].Accepted || batch.Results[0].Reason != "already recorded; the later Grade stands" {
+		t.Fatalf("expected the replay reason, got %+v", batch.Results[0])
+	}
+}
+
 // A batch that carries no Grades is refused rather than answered: a device would
 // take a 200 as the batch delivered and drop the Grades it meant to send, which
 // is how a mistyped key arrives — unknown fields are discarded on the way in.

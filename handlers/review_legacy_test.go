@@ -109,6 +109,29 @@ func TestUpdateReviewRefusesAnUnreadableDeck(t *testing.T) {
 	}
 }
 
+// A Deck that is gone is unreadable too: the legacy path refuses it with the
+// same 403, and stores nothing.
+func TestUpdateReviewRefusesADeletedDeck(t *testing.T) {
+	h := newTestHandler(t)
+	learner := dbtest.SeedUser(t, "learner@example.com")
+	deckID := dbtest.SeedDeck(t, learner, false)
+	cardID := dbtest.SeedCard(t, deckID, "지운", "deleted")
+	if err := dbtest.Queries(t).DeleteDeck(context.Background(), deckID); err != nil {
+		t.Fatalf("failed to delete the Deck: %v", err)
+	}
+
+	w := put(t, h.UpdateReview, learner, legacyReviewRoute, legacyReviewPath(cardID), `{"ease":3}`)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, err := dbtest.Queries(t).GetUserCard(context.Background(), db.GetUserCardParams{
+		UserID: learner, CardID: cardID,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("expected no Review for a deleted Deck, got %v", err)
+	}
+}
+
 // A public Deck and a Deck shared for viewing are both studiable: the access
 // gate refuses only a Deck the caller may not read.
 func TestUpdateReviewAcceptsReadableDecks(t *testing.T) {

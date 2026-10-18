@@ -615,6 +615,7 @@ Associates a card with the authenticated user's study deck (`user_cards` table) 
   - `201 Created`: `{"message": "Review created"}`
   - `400 Bad Request`: `{"error": "Invalid request body"}` or `{"error": "Failed to create Review"}`
   - `401 Unauthorized`: `{"error": "Unauthorized"}`
+  - `403 Forbidden`: `{"error": "Access to this private deck is restricted"}` — the caller may not read the Deck holding the Card
 
 #### `GET /api/v1/reviews/`
 Retrieves all cards currently due for review (`next_review_at <= NOW()`) for the authenticated user.
@@ -662,7 +663,7 @@ Submits a Grade (1–4) after reviewing a card. The server recalculates the Revi
   - `400 Bad Request`: `{"error": "Invalid request body"}` — the body is not a Grade, or `ease` is outside 1–4
   - `403 Forbidden`: `{"error": "Access to this private deck is restricted"}` — the caller may not read the Deck holding the Card
   - `404 Not Found`: `{"error": "Card not found"}` — no such Card, or one deleted
-  - `500 Internal Server Error`: `{"error": "Failed to get card"}`, `{"error": "Failed to read the Review schedule"}`, `{"error": "Failed to get UserCard"}`, or `{"error": "Failed to update UserCard"}`
+  - `500 Internal Server Error`: `{"error": "Failed to get card"}`, `{"error": "Failed to get UserCard"}`, or `{"error": "Failed to update UserCard"}`
 
 #### `GET /api/v1/reviews/since/:time`
 Fetches cards due for review within a given time window (`next_review_at <= NOW() AND next_review_at > time`).
